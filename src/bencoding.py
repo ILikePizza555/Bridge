@@ -112,3 +112,17 @@ def _decode_dict(s: bytearray) -> Tuple[OrderedDict, bytearray]:
             c = False
 
     return dict_accumulator, remainder[1:]
+
+
+def encode(data: Union[str, int, list, dict]) -> bytearray:
+    """
+    Bencodes the specified data
+    """
+    if type(data) == str:
+        return str.encode(str(len(data)) + ":" + data)
+    elif type(data) == int:
+        return str.encode('i' + str(data) + 'e')
+    elif isinstance(data, list):
+        return b'l' + b''.join([encode(item) for item in data]) + b'e'
+    elif isinstance(data, dict):
+        return b'd' + b''.join([encode(key) + encode(value) for key, value in data.items()]) + b'e'

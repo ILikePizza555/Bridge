@@ -48,3 +48,23 @@ def test_decode_torrent():
         assert type(value) == OrderedDict
         assert value[b'announce'] == b'http://torrent.ubuntu.com:6969/announce'
         assert value[b'info'][b'length'] == 1609039872
+
+
+def test_encode_string():
+    return_string = bencoding.encode("abcd")
+    assert return_string == b'4:abcd'
+
+
+def test_encode_int():
+    return_string = bencoding.encode(42)
+    assert return_string == b'i42e'
+
+
+def test_encode_list():
+    return_string = bencoding.encode([42, "abcd"])
+    assert return_string == b'li42e4:abcde'
+
+
+def test_encode_dict():
+    return_string = bencoding.encode(OrderedDict({"key": "value", 42: 25}))
+    assert return_string == b'd3:key5:valuei42ei25ee'
