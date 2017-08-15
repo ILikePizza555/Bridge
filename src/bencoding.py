@@ -17,7 +17,7 @@ def is_byte_digit(b: int) -> bool:
     return b >= 48 and b <= 57
 
 
-def extract_int(s: bytearray) -> int:
+def extract_int(s: bytearray) -> Tuple[int, bytearray]:
     """Extracts an integer from the given bytearry, assuming the first
     value is the starting digit."""
 
@@ -33,63 +33,82 @@ def extract_int(s: bytearray) -> int:
     return int(current_num.decode()), s[i:]
 
 
-def decode(s: bytearray) -> Tuple[Union[str, int, list, OrderedDict, None], Optional[bytearray]]:
+def decode(s: bytearray) -> Tuple[Union[bytearray, int, list, OrderedDict, None], Optional[bytearray]]:
+    """
+    Decodes a bencoded bytestring.
+    """
     # base case
     if len(s) == 0:
         return None, None
 
     # byte string
     elif is_byte_digit(s[0]):
-        length, remainder = extract_int(s)
-
-        if remainder[0] == TOKEN_STRING_SEPARATOR:
-            length += 1
-            return remainder[1:length].decode(), remainder[length:]
-        
-        # TODO: Better errors
-        raise RuntimeError("Malformed input")
+        return _decode_bytestring(s)
 
     # integers
     elif s[0] == TOKEN_INTEGER:
-        value, remainder = extract_int(s[1:])
-
-        if remainder[0] == TOKEN_END:
-            return value, remainder[1:]
-
-        raise RuntimeError("Malformed input")
+        return _decode_int(s)
 
     # lists
     elif s[0] == TOKEN_LIST:
-        accumulator = []
-        remainder = s[1:]
-        c = True
-
-        while c:
-            value, remainder = decode(remainder)
-
-            accumulator.append(value)
-
-            if len(remainder) == 0 or remainder[0] == TOKEN_END:
-                c = False
-        
-        return accumulator, remainder[1:]
+        return _decode_list(s)
 
     # dictionary
     elif s[0] == TOKEN_DICTIONARY:
-        accumulator = OrderedDict()
-        remainder = s[1:]
-        c = True
-
-        while c:
-            # dictionarties need a value for each key, so we call the function twice
-            key, r1 = decode(remainder)
-            value, remainder = decode(r1)
-
-            accumulator[key] = value
-
-            if len(remainder) == 0 or remainder[0] == TOKEN_END:
-                c = False
-
-        return accumulator, remainder[1:]
+        return _decode_dict(s)
     
-    raise RuntimeError("Malformed Input - Byte arry did not start with number, \"i\", \"d\", or \"l\"")
+    raise RuntimeError('Malformed Input - Byte arry did not start with number, "i", "d", or "l"')
+
+
+def _decode_bytestring(s: bytearray) -> Tuple[bytearray, bytearray]:
+    length, remainder = extract_int(s)
+
+    if remainder[0] == TOKEN_STRING_SEPARATOR:
+        length += 1
+        return remainder[1:length], remainder[length:]
+        
+    # TODO: Better errors
+    raise RuntimeError("Malformed input")
+
+
+def _decode_int(s: bytearray) -> Tuple[int, bytearray]:
+    value, remainder = extract_int(s[1:])
+
+    if remainder[0] == TOKEN_END:
+        return value, remainder[1:]
+
+    raise RuntimeError("Malformed input")
+
+
+def _decode_list(s: bytearray) -> Tuple[list, bytearray]:
+    list_accumulator = []
+    remainder = s[1:]
+    c = True
+
+    while c:
+        value, remainder = decode(remainder)
+
+        list_accumulator.append(value)
+
+        if len(remainder) == 0 or remainder[0] == TOKEN_END:
+            c = False
+
+    return list_accumulator, remainder[1:]
+
+
+def _decode_dict(s: bytearray) -> Tuple[OrderedDict, bytearray]:
+    dict_accumulator = OrderedDict()
+    remainder = s[1:]
+    c = True
+
+    while c:
+        # dictionarties need a value for each key, so we call the function twice
+        key, r1 = decode(remainder)
+        value, remainder = decode(r1)
+
+        dict_accumulator[key] = value
+
+        if len(remainder) == 0 or remainder[0] == TOKEN_END:
+            c = False
+
+    return dict_accumulator, remainder[1:]
