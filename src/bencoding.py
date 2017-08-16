@@ -114,14 +114,16 @@ def _decode_dict(s: bytearray) -> Tuple[OrderedDict, bytearray]:
     return dict_accumulator, remainder[1:]
 
 
-def encode(data: Union[str, int, list, dict]) -> bytearray:
+def encode(data: Union[str, int, list, dict, bytes]) -> bytes:
     """
     Bencodes the specified data
     """
     if type(data) == str:
-        return str.encode(str(len(data)) + ":" + data)
+        return bytes(str(len(data)) + ":" + data, encoding="utf-8")
     elif type(data) == int:
-        return str.encode('i' + str(data) + 'e')
+        return bytes('i' + str(data) + 'e', encoding="utf-8")
+    elif type(data) == bytes:
+        return bytes(str(len(data)) + ":", encoding="utf-8") + data
     elif isinstance(data, list):
         return b'l' + b''.join([encode(item) for item in data]) + b'e'
     elif isinstance(data, dict):
