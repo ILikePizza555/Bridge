@@ -1,3 +1,4 @@
+"""Encode and Decode functions for bencoding"""
 from collections import OrderedDict
 from typing import Union, Tuple, Optional
 

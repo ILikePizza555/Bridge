@@ -1,8 +1,8 @@
-from torrent import Torrent, TorrentFile
+from bridge.torrent import TorrentData, TorrentFile
 
 
 def test_single_torrent_create():
-    torrent = Torrent("test.torrent")
+    torrent = TorrentData("test.torrent")
 
     assert torrent.filename == "test.torrent"
     assert torrent["info.name"] == b'ubuntu-17.04-desktop-amd64.iso'
@@ -11,7 +11,7 @@ def test_single_torrent_create():
 
 
 def test_multi_torrent_create():
-    torrent = Torrent("test2.torrent")
+    torrent = TorrentData("test2.torrent")
 
     assert torrent.filename == "test2.torrent"
     assert torrent["info.name"] == b'slackware64-14.2-iso'

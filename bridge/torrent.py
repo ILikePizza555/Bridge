@@ -1,7 +1,8 @@
+"""Classes for managing bit torrent data"""
 from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split
-import bencoding
+from . import bencoding
 import hashlib
 import operator
 
@@ -22,7 +23,7 @@ class InvalidTorrentError(Exception):
         self.message = message
 
 
-class Torrent:
+class TorrentData:
     """
     Helper class for dealing with torrent files.
 

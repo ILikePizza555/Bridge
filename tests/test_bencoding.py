@@ -1,5 +1,4 @@
-import bencoding
-import pytest
+from bridge import bencoding
 
 from collections import OrderedDict
 
