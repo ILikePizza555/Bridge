@@ -88,6 +88,9 @@ class TorrentData:
         else:
             raise InvalidTorrentError(self.filename, "File does not contain piece data in 'info'")
 
+    def __str__(self):
+        return "TorrentData - Filename: {}, Info Hash: {}".format(self.filename, self.info_hash)
+
 
 class Torrent:
     """

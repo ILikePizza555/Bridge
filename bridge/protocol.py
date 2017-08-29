@@ -87,7 +87,8 @@ class TrackerResponse():
     
     def __str__(self):
         if self.sucessful:
-            return ("warning: {}\n"
+            return ("Tracker Response\n"
+                    "warning: {}\n"
                     "seeders: {}\n"
                     "leechers: {}\n"
                     "peers: {}"
@@ -96,7 +97,7 @@ class TrackerResponse():
                              self.leechers,
                              self.peers)
         else:
-            return self.failure
+            return "Tracker Response: " + self.failure_reason
 
 
 class TrackerEvent(Enum):
@@ -148,12 +149,12 @@ async def announce_tracker(torrent: Torrent,
     # TODO: Stop creating as session everytime we need to announce
     async with aiohttp.ClientSession() as session:
 
-        url = announce_url + urlencode(get_params)
+        url = announce_url + "?" + urlencode(get_params)
 
         async with session.get(url) as resp:
 
             if resp.status == 200:
-                return TrackerResponse(bencoding.decode(await resp.read()))
+                return TrackerResponse(bencoding.decode(await resp.read())[0])
             else:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await resp.text()))

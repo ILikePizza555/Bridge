@@ -4,12 +4,12 @@ from collections import namedtuple
 import pytest
 
 
-TestTorrent = namedtuple("Torrent", ["data"])
+_TestTorrent = namedtuple("Torrent", ["data"])
 
 
 @pytest.mark.asyncio
 async def test_announce():
-    t = TestTorrent(data=TorrentData("test.torrent"))
+    t = _TestTorrent(data=TorrentData("test.torrent"))
 
     tracker_response = await announce_tracker(t, t.data["announce"].decode("utf-8"),
                                               generate_peer_id(True), 6050)
