@@ -1,15 +1,97 @@
 """Contains functions and coroutines for the bit torrent protocol"""
 from .torrent import Torrent, NEW_CONNECTION_LIMIT
-from collections import namedtuple
-from typing import Optional, Union
+from typing import Optional
 from enum import auto, Enum
 from urllib.parse import quote, quote_from_bytes
+from pizza_utils.listutils import chunk
+from struct import unpack
 import aiohttp
-import bencoding
+import socket
 
 
-TrackerResponse = namedtuple('TrackerResponse', ["warning_message", "interval", "min_interval",
-                                                 "tracker_id", "complete", "incomplete", "peers"])
+class Peer():
+    @classmethod
+    def from_bin(cls, binrep: bytes):
+        """Builds a peer from the binary representation"""
+        ip = socket.inet_ntoa(binrep[:4])
+        port = unpack(">H", binrep[4:])[0]
+        return cls(bytes([0]), ip, port)
+
+    def __init__(self, pid: bytes, ip: bytes, port: int):
+        self.pid = pid.decode("utf-8")
+        self.ip = ip.decode("utf-8")
+        self.port = port
+
+    def __str__(self):
+        return "{}:{}".format(self.ip, self.port)
+
+
+class TrackerResponse():
+    def __init__(self, response: dict):
+        self.response = response
+    
+    @property
+    def sucessful(self) -> bool:
+        return b"failure reason" in self.response
+
+    @property
+    def failure(self) -> str:
+        """Returns a failure reason if one exists. Otherwise returns None."""
+        if b"failure reason" in self.response:
+            return self.response[b"failure reason"].decode("utf-8")
+        return None
+
+    @property
+    def warning_message(self) -> str:
+        """Returns a warning message if one exists. Otherwise returns None."""
+        if b"warning message" in self.response:
+            return self.response[b"warning message"].decode("utf-8")
+        return None
+
+    @property
+    def interval(self) -> int:
+        return self.response[b"interval"]
+
+    @property
+    def min_interval(self) -> int:
+        if b"min interval" in self.response:
+            return self.response[b"min interval"]
+        return None
+
+    @property
+    def tracker_id(self) -> bytes:
+        return self.response[b"tracker id"]
+
+    @property
+    def seeders(self) -> int:
+        return self.response[b"complete"]
+
+    @property
+    def leechers(self) -> int:
+        return self.response[b"incomplete"]
+
+    @property
+    def peers(self) -> list:
+        peers = self.response[b"peers"]
+
+        if type(peers) == list:
+            # Dictionary model
+            return [Peer(*p.values()) for p in peers]
+        else:
+            return [Peer.from_bin(p) for p in chunk(peers, 6)]
+    
+    def __str__(self):
+        if self.sucessful:
+            return ("warning: {}\n"
+                    "seeders: {}\n"
+                    "leechers: {}\n"
+                    "peers: {}"
+                    ).format(self.warning_message, 
+                             self.seeders,
+                             self.leechers,
+                             self.peers)
+        else:
+            return self.failure
 
 
 class TrackerEvent(Enum):
@@ -61,7 +143,4 @@ async def announce_tracker(torrent: Torrent,
     # TODO: Stop creating as session everytime we need to announce
     async with aiohttp.ClientSession() as session:
         async with session.get(announce_url, **get_params) as resp:
-            resp_dict = bencoding.decode(await resp.read())
-
-            if resp.status == 200:
-                return TrackerResponse()
+            return TrackerResponse(bencoding.decode(await resp.read()))

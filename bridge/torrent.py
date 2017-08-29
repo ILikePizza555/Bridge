@@ -9,7 +9,7 @@ import operator
 
 MAX_PEERS = 55
 NEW_CONNECTION_LIMIT = 30
-PEER_ID_PREFIX = "-BI0001-" + "".join(choices(range(0, 10), k=12))
+PEER_ID_PREFIX = "-BI0001-" + "".join(map(str, choices(range(0, 10), k=12)))
 
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
 
