@@ -4,7 +4,7 @@ from .torrent import Torrent, NEW_CONNECTION_LIMIT
 from typing import Optional
 from enum import auto, Enum
 from random import choices
-from urllib.parse import quote, quote_from_bytes, urlencode
+from urllib.parse import urlencode
 from pizza_utils.listutils import chunk
 from struct import unpack
 import aiohttp
@@ -18,13 +18,16 @@ class Peer():
     @classmethod
     def from_bin(cls, binrep: bytes):
         """Builds a peer from the binary representation"""
-        ip = socket.inet_ntoa(binrep[:4])
-        port = unpack(">H", binrep[4:])[0]
-        return cls(bytes([0]), ip, port)
+        rv = cls(None, None, 0)
 
-    def __init__(self, pid: bytes, ip: bytes, port: int):
-        self.pid = pid.decode("utf-8")
-        self.ip = ip.decode("utf-8")
+        rv.ip = socket.inet_ntoa(binrep[:4])
+        rv.port = unpack(">H", binrep[4:])[0]
+
+        return rv
+
+    def __init__(self, peer_id: bytes, ip: bytes, port: int):
+        self.peer_id = peer_id.decode("utf-8") if peer_id is not None else None
+        self.ip = ip.decode("utf-8") if ip is not None else None
         self.port = port
 
     def __str__(self):
@@ -119,9 +122,9 @@ async def announce_tracker(torrent: Torrent,
                            numwant: Optional[int] = NEW_CONNECTION_LIMIT) -> TrackerResponse:
     """Announces to the tracker defined in torrent"""
     get_params = {
-        "info_hash": quote_from_bytes(torrent.data.info_hash),
+        "info_hash": torrent.data.info_hash,
         # Peer_id may have binary data so we urlencode it here.
-        "peer_id": quote(peer_id),
+        "peer_id": peer_id,
         "port": port,
         # TODO: Implement uploaded, downloaded, and left (should be in torrent)
         "uploaded": str(0),

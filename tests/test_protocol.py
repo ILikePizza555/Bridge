@@ -12,7 +12,7 @@ async def test_announce():
     t = _TestTorrent(data=TorrentData("test.torrent"))
 
     tracker_response = await announce_tracker(t, t.data["announce"].decode("utf-8"),
-                                              generate_peer_id(True), 6050)
+                                              generate_peer_id(True), 8301)
     
     print(tracker_response)
     assert tracker_response.sucessful is True
