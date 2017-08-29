@@ -1,12 +1,17 @@
 """Contains functions and coroutines for the bit torrent protocol"""
+from . import bencoding
 from .torrent import Torrent, NEW_CONNECTION_LIMIT
 from typing import Optional
 from enum import auto, Enum
-from urllib.parse import quote, quote_from_bytes
+from random import choices
+from urllib.parse import quote, quote_from_bytes, urlencode
 from pizza_utils.listutils import chunk
 from struct import unpack
 import aiohttp
 import socket
+
+
+PEER_ID_PREFIX = "-BI0001-"
 
 
 class Peer():
@@ -32,10 +37,10 @@ class TrackerResponse():
     
     @property
     def sucessful(self) -> bool:
-        return b"failure reason" in self.response
+        return b"failure reason" not in self.response
 
     @property
-    def failure(self) -> str:
+    def failure_reason(self) -> str:
         """Returns a failure reason if one exists. Otherwise returns None."""
         if b"failure reason" in self.response:
             return self.response[b"failure reason"].decode("utf-8")
@@ -104,8 +109,8 @@ async def announce_tracker(torrent: Torrent,
                            announce_url: str,
                            peer_id: str,
                            port: int,
-                           key: Optional[int],
-                           trackerid: Optional[str],
+                           key: Optional[int] = None,
+                           trackerid: Optional[str] = None,
                            compact: int = 0,
                            no_peer_id: int = 0,
                            event: Optional[TrackerEvent] = None,
@@ -142,5 +147,20 @@ async def announce_tracker(torrent: Torrent,
 
     # TODO: Stop creating as session everytime we need to announce
     async with aiohttp.ClientSession() as session:
-        async with session.get(announce_url, **get_params) as resp:
-            return TrackerResponse(bencoding.decode(await resp.read()))
+
+        url = announce_url + urlencode(get_params)
+
+        async with session.get(url) as resp:
+
+            if resp.status == 200:
+                return TrackerResponse(bencoding.decode(await resp.read()))
+            else:
+                raise ConnectionError("Announce failed."
+                                      "Tracker's reponse: \"{}\"".format(await resp.text()))
+
+
+def generate_peer_id(debug=False):
+    if debug:
+        return PEER_ID_PREFIX + "4" + "".join(map(str, choices(range(0, 10), k=11)))
+    else:
+        return PEER_ID_PREFIX + "1" + "".join(map(str, choices(range(0, 10), k=11)))

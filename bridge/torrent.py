@@ -2,14 +2,12 @@
 from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split, chunk
-from random import choices
 from . import bencoding
 import hashlib
 import operator
 
 MAX_PEERS = 55
 NEW_CONNECTION_LIMIT = 30
-PEER_ID_PREFIX = "-BI0001-" + "".join(map(str, choices(range(0, 10), k=12)))
 
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
 
@@ -105,10 +103,3 @@ class Torrent:
         self.data = TorrentData(filename)
         self.peers = []
         self.swarm = []
-
-    async def start(self):
-        """
-        Starts the torrent.
-        """
-
-        #First thing we need to do is announce
