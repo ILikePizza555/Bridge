@@ -2,25 +2,110 @@
 from . import bencoding
 from .torrent import Torrent, NEW_CONNECTION_LIMIT
 from typing import Optional
-from enum import auto, Enum
 from random import choices
 from urllib.parse import urlencode
 from pizza_utils.listutils import chunk
 from struct import unpack
 import aiohttp
+import enum
 import socket
 
 
 PEER_ID_PREFIX = "-BI0001-"
 
+@enum.unique
+class PeerMessage(enum.IntEnum):
+    keep_alive = -1
+    choke = 0
+    unchoke = 1
+    interested = 2
+    not_interested = 3
+    have = 4
+    bitfield = 5
+    request = 6
+    piece = 7
+    cancel = 8
+    port = 9
+
+
+class PeerMessageIterator():
+    def __init__(self, reader):
+        self._reader = reader
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            fd = await self._reader.read(4)
+
+            # Check if more data is present
+            if fd == b"":
+                raise StopAsyncIteration()
+
+            # Length is a 4-byte big endian integer, and the first of the message
+            length = unpack(">I", fd)[0]
+
+            # If the length is 0, no need to read data, it's a keep alive
+            if length == 0:
+                return (PeerMessage.keep_alive, None)
+
+            # Parse the data
+            data = await self._reader.read(length)
+            message_id = unpack('>b', data[0])[0]
+
+            if message_id < 4 and message_id >= 0:
+                return (PeerMessage(message_id), None)
+
+            if message_id == 5:
+                # TODO: Add bitfield verification here
+                return (PeerMessage.bitfield, data[1:])
+
+            if message_id == 6:
+                # The request message has 3 integers as it's payload
+                i = unpack(">I", data[1:5])[0]
+                b = unpack(">I", data[5:9])[0]
+                l = unpack(">I", data[9:13])[0]
+
+                return (PeerMessage.request, (i, b, l))
+
+            if message_id == 7 or message_id == 8:
+                # The piece (block) message has 2 integers and data as it's payload
+                # The cancel message has a payload identical to the piece message
+                i = unpack(">I", data[1:5])[0]
+                b = unpack(">I", data[5:9])[0]
+                block = data[9:]
+
+                return (PeerMessage(message_id), (i, b, block))
+
+            if message_id == 9:
+                return (PeerMessage.port, unpack(">H", data[1:])[0])
+
+        except ConnectionResetError:
+            raise StopAsyncIteration()
+
 
 class Peer():
+    """
+    Represents a Peer and the necessary connection state.
+    
+    Attributes:
+        - peer_id           The peer id recieved from the tracker, if any exists
+        - ip                The ip address of the peer
+        - port              The port the peer is listening on
+        - am_choking        Is this client choking the peer
+        - am_interested     Is this client interested in the peer
+        - peer_choking      Is the peer choking the client
+        - peer_interested   Is the peer interested in the client
+    """
+
     @classmethod
     def from_bin(cls, binrep: bytes):
         """Builds a peer from the binary representation"""
         rv = cls(None, None, 0)
 
         rv.ip = socket.inet_ntoa(binrep[:4])
+        # Port is a 2-byte big endian integer
         rv.port = unpack(">H", binrep[4:])[0]
 
         return rv
@@ -29,6 +114,11 @@ class Peer():
         self.peer_id = peer_id.decode("utf-8") if peer_id is not None else None
         self.ip = ip.decode("utf-8") if ip is not None else None
         self.port = port
+
+        self.am_choking = True
+        self.am_interested = False
+        self.peer_choking = True
+        self.peer_interested = False
 
     def __str__(self):
         return "{}:{}".format(self.ip, self.port)
@@ -103,10 +193,10 @@ class TrackerResponse():
             return "Tracker Response: " + self.failure_reason
 
 
-class TrackerEvent(Enum):
-    started = auto()
-    stopped = auto()
-    completed = auto()
+class TrackerEvent(enum.Enum):
+    started = enum.auto()
+    stopped = enum.auto()
+    completed = enum.auto()
 
 
 async def announce_tracker(torrent: Torrent,
