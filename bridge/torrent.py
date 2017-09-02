@@ -106,3 +106,5 @@ class Torrent:
         self.data = TorrentData(filename)
         self.peers = []
         self.swarm = []
+
+    
