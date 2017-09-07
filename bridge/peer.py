@@ -13,17 +13,21 @@ class PeerMessage():
         cls.message_id = message_id
         cls.length = length
 
-        PeerMessage.id_map[message_id] = cls
+        if type(message_id) == int:
+            PeerMessage.id_map[message_id] = cls
 
         return cls
 
     def __str__(self):
         return "PeerMessage(id: {}, length: {})".format(self.message_id, self.length)
 
+    def __eq__(self, other):
+        return self.message_id == other.message_id and self.length == other.length
+
     @classmethod
     def decode(cls, data: bytes):
         """Decodes a string of bytes into a message"""
-        cls()
+        return cls()
 
     def encode(self) -> bytes:
         """Encodes this message into a string of bytes to be sent over the network"""
@@ -58,6 +62,9 @@ class HavePeerMessage(PeerMessage, message_id=4, length=5):
     def __init__(self, piece_index: int):
         self.piece_index = piece_index
 
+    def __eq__(self, other):
+        return super().__eq__(other) and self.piece_index == other.piece_index
+
     @classmethod
     def decode(cls, data: bytes):
         return cls(struct.unpack(">I", data)[0])
@@ -70,6 +77,9 @@ class BitfieldPeerMessage(PeerMessage, message_id=5):
     def __init__(self, bitfield: bytes):
         self.length = 1 + len(bitfield)
         self.bitfield = bitfield
+
+    def __eq__(self, other):
+        return super().__eq__(other) and self.bitfield == other.bitfield
 
     @classmethod
     def decode(cls, data: bytes):
@@ -84,6 +94,13 @@ class RequestPeerMessage(PeerMessage, message_id=6, length=13):
         self.index = index
         self.begin = begin
         self.size = size
+
+    def __eq__(self, other):
+        index_test = self.index == other.index
+        begin_test = self.begin == other.begin
+        size_test = self.size == other.size
+
+        return super().__eq__(other) and index_test and begin_test and size_test
 
     @classmethod
     def decode(cls, data: bytes):
@@ -101,10 +118,17 @@ class BlockPeerMessage(PeerMessage, message_id=7):
         self.begin = begin
         self.block = block
 
+    def __eq__(self, other):
+        index_test = self.index == other.index
+        begin_test = self.begin == other.begin
+        block_test = self.block == other.block
+
+        return super().__eq__(other) and index_test and begin_test and block_test
+
     @classmethod
     def decode(cls, data: bytes):
-        i, b = struct.unpack(">II", data[:9])
-        return cls(i, b, data[9:])
+        i, b = struct.unpack(">II", data[:8])
+        return cls(i, b, data[8:])
 
     def encode(self) -> bytes:
         return super().encode() + struct.pack(">II", self.index, self.begin) + self.block
@@ -115,6 +139,13 @@ class CancelPeerMessage(PeerMessage, message_id=8, length=13):
         self.index = index
         self.begin = begin
         self.size = size
+
+    def __eq__(self, other):
+        index_test = self.index == other.index
+        begin_test = self.begin == other.begin
+        size_test = self.size == other.size
+
+        return super().__eq__(other) and index_test and begin_test and size_test
 
     @classmethod
     def decode(cls, data: bytes):
@@ -127,6 +158,9 @@ class CancelPeerMessage(PeerMessage, message_id=8, length=13):
 class PortPeerMessage(PeerMessage, message_id=9, length=3):
     def __init__(self, port):
         self.port = port
+
+    def __eq__(self, other):
+        return super().__eq__(other) and self.port == other.port
 
     @classmethod
     def decode(cls, data: bytes):
@@ -160,12 +194,13 @@ class PeerMessageIterator():
 
             # Read out only the length of the message, parse the message id, then decode the message
             data = await self._reader.read(length)
-            message_id, = struct.unpack('>b', data[0])
+            message_id = data[0]
 
             return PeerMessage.id_map[message_id].decode(data[1:])
-
         except ConnectionResetError:
             raise StopAsyncIteration()
+
+        raise StopAsyncIteration()
 
 
 class Peer():
