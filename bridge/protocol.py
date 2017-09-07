@@ -1,131 +1,16 @@
 """Contains functions and coroutines for the bit torrent protocol"""
 from . import bencoding
 from .torrent import Torrent, NEW_CONNECTION_LIMIT
-from typing import Any, Optional
+from .peer import Peer
+from typing import Optional
 from random import choices
 from urllib.parse import urlencode
 from pizza_utils.listutils import chunk
 import aiohttp
 import enum
-import socket
-import struct
 
 
 PEER_ID_PREFIX = "-BI0001-"
-
-
-@enum.unique
-class PeerMessage(enum.IntEnum):
-    keep_alive = -1
-    choke = 0
-    unchoke = 1
-    interested = 2
-    not_interested = 3
-    have = 4
-    bitfield = 5
-    request = 6
-    block = 7
-    cancel = 8
-    port = 9
-
-
-class PeerMessageIterator():
-    def __init__(self, reader):
-        self._reader = reader
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        try:
-            fd = await self._reader.read(4)
-
-            # Check if more data is present
-            if fd == b"":
-                raise StopAsyncIteration()
-
-            # Length is a 4-byte big endian integer, and the first of the message
-            length = struct.unpack(">I", fd)[0]
-
-            # If the length is 0, no need to read data, it's a keep alive
-            if length == 0:
-                return (PeerMessage.keep_alive, None)
-
-            # Read out only the length of the message, parse the message id, then parse the message
-            data = await self._reader.read(length)
-            message_id = struct.unpack('>b', data[0])[0]
-
-            if message_id < 4 and message_id >= 0:
-                return (PeerMessage(message_id), None)
-
-            if message_id == 4:
-                return (PeerMessage.have, struct.unpack(">I", data[1:]))
-
-            if message_id == 5:
-                # TODO: Add bitfield verification here
-                return (PeerMessage.bitfield, data[1:])
-
-            if message_id == 6 or message_id == 8:
-                # The request message has 3 integers as it's payload
-                # The cancel message has a payload identical to the request message
-                i = struct.unpack(">I", data[1:5])[0]
-                b = struct.unpack(">I", data[5:9])[0]
-                l = struct.unpack(">I", data[9:13])[0]
-
-                return (PeerMessage(message_id), (i, b, l))
-
-            if message_id == 7:
-                # The piece (block) message has 2 integers and data as it's payload
-                i = struct.unpack(">I", data[1:5])[0]
-                b = struct.unpack(">I", data[5:9])[0]
-                block = data[9:]
-
-                return (PeerMessage.block, (i, b, block))
-
-            if message_id == 9:
-                return (PeerMessage.port, struct.unpack(">H", data[1:])[0])
-
-        except ConnectionResetError:
-            raise StopAsyncIteration()
-
-
-class Peer():
-    """
-    Represents a Peer and the necessary connection state.
-    
-    Attributes:
-        - peer_id           The peer id recieved from the tracker, if any exists
-        - ip                The ip address of the peer
-        - port              The port the peer is listening on
-        - am_choking        Is this client choking the peer
-        - am_interested     Is this client interested in the peer
-        - peer_choking      Is the peer choking the client
-        - peer_interested   Is the peer interested in the client
-    """
-
-    @classmethod
-    def from_bin(cls, binrep: bytes):
-        """Builds a peer from the binary representation"""
-        rv = cls(None, None, 0)
-
-        rv.ip = socket.inet_ntoa(binrep[:4])
-        # Port is a 2-byte big endian integer
-        rv.port = struct.unpack(">H", binrep[4:])[0]
-
-        return rv
-
-    def __init__(self, peer_id: bytes, ip: bytes, port: int):
-        self.peer_id = peer_id.decode("utf-8") if peer_id is not None else None
-        self.ip = ip.decode("utf-8") if ip is not None else None
-        self.port = port
-
-        self.am_choking = True
-        self.am_interested = False
-        self.peer_choking = True
-        self.peer_interested = False
-
-    def __str__(self):
-        return "{}:{}".format(self.ip, self.port)
 
 
 class TrackerResponse():
@@ -255,47 +140,6 @@ async def announce_tracker(torrent: Torrent,
             else:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await resp.text()))
-
-
-def encode_peer_message(m: PeerMessage, *data: Any) -> bytes:
-    """
-    Encodes a PeerMessage and a payload into a bytes object to be sent over the network.
-    All payloads should be represented in the same way they're recieved from PeerMessageIterator
-
-    Keep-alive, chock, unchok, interested, and not interested ignore the data parameter
-    Have takes a single integer
-    Bitfield takes a bytes object as it's payload
-    Request takes a tuple of 3 integers
-    Piece and cancel takes a tuple (int, int, bytes)
-    Port takes an integer
-    """
-
-    def build_header(length):
-        return struct.pack(">I", length) + struct.pack('>b', m.value)
-
-    if m is PeerMessage.keep_alive:
-        return struct.pack(">I", 0)
-
-    # choke, unchoke, interested, and not interested are all similar with no payload except for id
-    if m.value >= 0 and m.value <= 3:
-        return build_header(1)
-
-    if m is PeerMessage.have:
-        return build_header(5) + struct.pack(">I", data[0])
-
-    if m is PeerMessage.bitfield:
-        return build_header(1 + len(data)) + data[0]
-
-    if m is PeerMessage.request or m is PeerMessage.cancel:
-        payload = struct.pack(">I", data[0]) + struct.pack(">I", data[1]) + struct.pack(">I", data[2])
-        return build_header(13) + payload
-
-    if m is PeerMessage.block:
-        payload = struct.pack(">I", data[0]) + struct.pack(">I", data[1]) + data[2]
-        return build_header(9 + len(data[2])) + payload
-
-    if m is PeerMessage.port:
-        return build_header(3) + struct.pack(">H", data[0])
 
 
 def generate_peer_id(debug=False):
