@@ -203,6 +203,36 @@ class PeerMessageIterator():
         raise StopAsyncIteration()
 
 
+class HandshakeMessage():
+    """
+    Not part of the peer wire protocol, but it's the first message transmitted by the client which
+    initatied the connection.
+    """
+    @classmethod
+    def decode(cls, data: bytes):
+        pstring_length = data[0]
+        reserved_index = 1 + pstring_length
+        info_hash_index = reserved_index + 8
+        peer_id_index = info_hash_index + 20
+
+        pstring = data[1:reserved_index].decode()
+        reserved = data[reserved_index:info_hash_index]
+        info_hash = data[info_hash_index:peer_id_index]
+        peer_id = data[peer_id_index:].decode()
+
+        return cls(pstring, reserved, info_hash, peer_id)
+
+    def __init__(self, protocol_string: str, reserved: bytes, info_hash: bytes, peer_id: str):
+        self.protocol_string = protocol_string
+        self.reserved = reserved
+        self.info_hash = info_hash
+        self.peer_id = peer_id
+
+    def encode(self) -> bytes:
+        pstr_header = bytes([len(self.protocol_string)]) + self.protocol_string.encode()
+        return pstr_header + self.reserved + self.info_hash + self.peer_id.encode()
+
+
 class Peer():
     """
     Represents a Peer and the necessary connection state.

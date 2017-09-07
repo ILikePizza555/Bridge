@@ -74,7 +74,7 @@ class TrackerResponse():
                     "seeders: {}\n"
                     "leechers: {}\n"
                     "peers: {}"
-                    ).format(self.warning_message, 
+                    ).format(self.warning_message,
                              self.seeders,
                              self.leechers,
                              self.peers)
@@ -90,25 +90,34 @@ class TrackerEvent(enum.Enum):
 
 async def announce_tracker(torrent: Torrent,
                            announce_url: str,
-                           peer_id: str,
-                           port: int,
+                           compact: int = 1,
+                           no_peer_id: int = 0,
                            key: Optional[int] = None,
                            trackerid: Optional[str] = None,
-                           compact: int = 0,
-                           no_peer_id: int = 0,
                            event: Optional[TrackerEvent] = None,
                            ip: Optional[str] = None,
                            numwant: Optional[int] = NEW_CONNECTION_LIMIT) -> TrackerResponse:
-    """Announces to the tracker defined in torrent"""
+    """
+    Announces to the tracker.
+
+    Params:
+        - torrent: The torrent object that corresponds to the announce
+        - announce_url: the url to announce to
+        - compact: Optional. Indicates that the client accepts a compact response. Defaults to 1.
+        - no_peer_id: Optional. Indicates that the tracker can omit peer_ids. Defaults to 0.
+        - key: Optional. An additional id that's not shared with other peers.
+        - trackerid: Optional. A previously recieved string that should be sent on next announcements
+        - event: Optional.
+        - ip: Optional. The true ip of the client
+        - numwant: Optional. The number of peers the client wants to recieve. Defaults to NEW_CONNECTION_LIMIT.
+    """
     get_params = {
         "info_hash": torrent.data.info_hash,
-        # Peer_id may have binary data so we urlencode it here.
-        "peer_id": peer_id,
-        "port": port,
-        # TODO: Implement uploaded, downloaded, and left (should be in torrent)
-        "uploaded": str(0),
-        "downloaded": str(0),
-        "left": str(1),
+        "peer_id": torrent.peer_id,
+        "port": torrent.port,
+        "uploaded": torrent.uploaded,
+        "downloaded": torrent.downloaded,
+        "left": torrent.left,
         "compact": compact,
         "no_peer_id": no_peer_id
     }
