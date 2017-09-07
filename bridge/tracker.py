@@ -79,7 +79,7 @@ class TrackerResponse():
                              self.leechers,
                              self.peers)
         else:
-            return "Tracker Response: " + self.failure_reason
+            return "Tracker Failure Response: " + self.failure_reason
 
 
 class TrackerEvent(enum.Enum):
@@ -124,7 +124,7 @@ async def announce_tracker(torrent: Torrent,
 
     if event is not None:
         get_params["event"] = event.name
-    
+
     if ip is not None:
         get_params["ip"] = ip
 

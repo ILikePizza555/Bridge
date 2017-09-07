@@ -127,7 +127,8 @@ class Torrent:
         self.peers = []
         self.swarm = []
 
-        self.logger = logging.getLogger("bridge.torrent." + self.data.name[:8])
+        self._logger = logging.getLogger("bridge.torrent." + self.data.name[:8])
+        self.announce_time
 
     @property
     def uploaded(self) -> str:
@@ -145,9 +146,26 @@ class Torrent:
         return str(1)
 
     async def annnounce(self):
-        self.logger.info("Beginning anounce...")
+        self._logger.info("Beginning anounce...")
 
         for announce_url in self.data.announce:
-            self.logger.info("Announcing on " + announce_url)
+            self._logger.info("Announcing on " + announce_url)
 
-            tracker.announce_tracker(self, announce_url )
+            peer_count_request = max(NEW_CONNECTION_LIMIT - len(self.peers), 0)
+            self._logger.info("Requesting {} peers".format(peer_count_request))
+
+            response = tracker.announce_tracker(self, announce_url, numwant=peer_count_request)
+
+            if not response.sucessful:
+                self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
+                continue
+
+            self._logger.info("Announce successful.")
+
+            if peer_count_request > 0:
+                # Dump all the peers into the swarm
+                new_peers = [p for p in response.peers if p not in self.swarm]
+                self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
+                self.swarm.extend(new_peers)
+    
+    
