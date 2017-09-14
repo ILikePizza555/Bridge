@@ -28,7 +28,7 @@ class Client():
         Performs the proper connection initalization for incoming peer connections.
         """
         # Get connection data
-        ip, port = writer.get_extra_info["socket"].getpeername()
+        ip, port = writer.get_extra_info("socket").getpeername()
         # Wait for the handshake
         handshake = peer.HandshakeMessage.decode(await reader.read(49 + len(peer.PROTOCOL_STRING)))
 

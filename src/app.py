@@ -29,10 +29,10 @@ async def load_files() -> List[data.Torrent]:
 
 async def start_app(loop: asyncio.AbstractEventLoop):
     try:
-        print("Starting app")
+        print("Starting app. Listening on port {}".format(listen_port))
 
         peer_client = client.Client(loop)
-        asyncio.start_server(peer_client.on_incoming, port=listen_port, loop=loop)
+        await asyncio.start_server(peer_client.on_incoming, port=listen_port, loop=loop)
 
         for t in await load_files():
             app_logger.info("Adding torrent {}".format(t))
