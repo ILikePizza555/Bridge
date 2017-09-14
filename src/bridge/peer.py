@@ -1,6 +1,5 @@
-from .torrent import Torrent
 from asyncio import StreamReader, StreamWriter
-from collections import namedtuple
+from . import torrent
 import struct
 import socket
 import logging
@@ -303,10 +302,10 @@ class PeerManager():
         self._torrents: list[Torrent] = []
         self._logger = logging.getLogger("bridge.peermanager")
 
-    def add_torrent(self, torrent: Torrent):
+    def add_torrent(self, torrent: torrent.Torrent):
         self._torrents.append(torrent)
 
-    async def handle_peer(self, torrent: Torrent, peer: Peer, reader: StreamReader, writer: StreamWriter):
+    async def handle_peer(self, torrent: torrent.Torrent, peer: Peer, reader: StreamReader, writer: StreamWriter):
         """
         Handles a peer client after proper initation procedures have been completed.
         """

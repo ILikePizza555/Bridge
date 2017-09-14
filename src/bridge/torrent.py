@@ -2,7 +2,7 @@
 from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split, chunk
-from . import bencoding, tracker, peer
+from . import bencoding, peer, tracker
 import hashlib
 import logging
 import operator
@@ -93,7 +93,11 @@ class TorrentData:
     def _load_announce(self):
         if "announce" in self:
             if "announce-list" in self:
-                full_list = self["announce"] + self["announce-list"]
+                full_list = self["announce-list"]
+
+                if self["announce"] not in self["announce-list"]:
+                    self["announce-list"].append(self["announce"]) 
+
                 self.announce = tuple(url.decode() for url in full_list)
             else:
                 self.announce = (self["announce"].decode(),)

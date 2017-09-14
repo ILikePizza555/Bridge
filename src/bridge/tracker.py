@@ -1,7 +1,5 @@
 """Contains functions and coroutines for the bit torrent protocol"""
-from . import bencoding
-from .torrent import Torrent, NEW_CONNECTION_LIMIT
-from .peer import Peer
+from . import bencoding, torrent, peer
 from typing import Optional
 from random import choices
 from urllib.parse import urlencode
@@ -63,9 +61,9 @@ class TrackerResponse():
 
         if type(peers) == list:
             # Dictionary model
-            return [Peer(*p.values()) for p in peers]
+            return [peer.Peer(*p.values()) for p in peers]
         else:
-            return [Peer.from_bin(p) for p in chunk(peers, 6)]
+            return [peer.Peer.from_bin(p) for p in chunk(peers, 6)]
     
     def __str__(self):
         if self.sucessful:
@@ -88,7 +86,7 @@ class TrackerEvent(enum.Enum):
     completed = enum.auto()
 
 
-async def announce_tracker(torrent: Torrent,
+async def announce_tracker(torrent: torrent.Torrent,
                            announce_url: str,
                            compact: int = 1,
                            no_peer_id: int = 0,
@@ -96,7 +94,7 @@ async def announce_tracker(torrent: Torrent,
                            trackerid: Optional[str] = None,
                            event: Optional[TrackerEvent] = None,
                            ip: Optional[str] = None,
-                           numwant: Optional[int] = NEW_CONNECTION_LIMIT) -> TrackerResponse:
+                           numwant: Optional[int] = peer.NEW_CONNECTION_LIMIT) -> TrackerResponse:
     """
     Announces to the tracker.
 

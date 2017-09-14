@@ -1,4 +1,4 @@
-from . import torrent, tracker, peer
+from bridge import torrent, tracker, peer
 import asyncio
 import glob
 import logging
