@@ -7,9 +7,6 @@ import hashlib
 import logging
 import operator
 
-MAX_PEERS = 55
-NEW_CONNECTION_LIMIT = 30
-
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
 
 
@@ -115,20 +112,19 @@ class Torrent:
         data        The TorrentData of the Torrent
         peer_id     A bytes object that holds the peer_id for transmission
         port        The port this client is listening on
-        peers       A list of all the peers this torrent is connected too
-        swarm       A list of all the peers the tracker has reported
+        swarm       A list of all the peers.
+        peers       A the peers the client is connected too
     """
 
     def __init__(self, filename: str, peer_id: str, port: int):
         self.data = TorrentData(filename)
         self.peer_id = peer_id.encode()
         self.port = port
-
-        self.peers = []
         self.swarm = []
+        self.peers = []
 
         self._logger = logging.getLogger("bridge.torrent." + self.data.name[:8])
-        self.announce_time
+        self._announce_time = []
 
     @property
     def uploaded(self) -> str:
@@ -151,7 +147,7 @@ class Torrent:
         for announce_url in self.data.announce:
             self._logger.info("Announcing on " + announce_url)
 
-            peer_count_request = max(NEW_CONNECTION_LIMIT - len(self.peers), 0)
+            peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
             self._logger.info("Requesting {} peers".format(peer_count_request))
 
             response = tracker.announce_tracker(self, announce_url, numwant=peer_count_request)
@@ -167,5 +163,3 @@ class Torrent:
                 new_peers = [p for p in response.peers if p not in self.swarm]
                 self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
                 self.swarm.extend(new_peers)
-    
-    

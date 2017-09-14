@@ -1,5 +1,14 @@
+from .torrent import Torrent
+from asyncio import StreamReader, StreamWriter
+from collections import namedtuple
 import struct
 import socket
+import logging
+
+
+PROTOCOL_STRING = "BitTorrent protocol"
+MAX_PEERS = 55
+NEW_CONNECTION_LIMIT = 30
 
 
 class PeerMessage():
@@ -222,11 +231,12 @@ class HandshakeMessage():
 
         return cls(pstring, reserved, info_hash, peer_id)
 
-    def __init__(self, protocol_string: str, reserved: bytes, info_hash: bytes, peer_id: str):
-        self.protocol_string = protocol_string
-        self.reserved = reserved
+    def __init__(self, info_hash: bytes, peer_id: str,
+                 protocol_string: str = PROTOCOL_STRING, reserved: bytes = bytes(8)):
         self.info_hash = info_hash
         self.peer_id = peer_id
+        self.protocol_string = protocol_string
+        self.reserved = reserved
 
     def encode(self) -> bytes:
         pstr_header = bytes([len(self.protocol_string)]) + self.protocol_string.encode()
@@ -258,15 +268,91 @@ class Peer():
 
         return rv
 
+    @classmethod
+    def from_str(cls, peer_id: str, ip: str, port: int):
+        rv = cls(None, None, port)
+        rv.peer_id = peer_id
+        rv.ip = ip
+        return rv
+
     def __init__(self, peer_id: bytes, ip: bytes, port: int):
         self.peer_id = peer_id.decode("utf-8") if peer_id is not None else None
         self.ip = ip.decode("utf-8") if ip is not None else None
         self.port = port
 
+        self.connected = False
         self.am_choking = True
         self.am_interested = False
         self.peer_choking = True
         self.peer_interested = False
 
+    def __eq__(self, other):
+        return self.ip == other.ip and self.port == other.port
+
     def __str__(self):
-        return "{}:{}".format(self.ip, self.port)
+        return "Peer {} {}:{} connected={}".format(self.peer_id, self.ip, self.port, self.connected)
+
+
+class PeerManager():
+    """
+    Manages peers, the connections to those peers, and the messages from those peers
+    """
+
+    def __init__(self, loop):
+        self._loop = loop
+        self._torrents: list[Torrent] = []
+        self._logger = logging.getLogger("bridge.peermanager")
+
+    def add_torrent(self, torrent: Torrent):
+        self._torrents.append(torrent)
+
+    async def handle_peer(self, torrent: Torrent, peer: Peer, reader: StreamReader, writer: StreamWriter):
+        """
+        Handles a peer client after proper initation procedures have been completed.
+        """
+        for message in PeerMessageIterator(reader):
+            print("Got message, " + str(message))
+
+    async def on_incoming(self, reader: StreamReader, writer: StreamWriter):
+        """
+        Performs the proper connection initalization for incoming peer connections.
+        """
+        # Get connection data
+        ip, port = writer.get_extra_info["socket"].getpeername()
+        # Wait for the handshake
+        handshake = HandshakeMessage.decode(await reader.read(49 + len(PROTOCOL_STRING)))
+
+        # Create a peer object to hold data
+        peer = Peer.from_str(handshake.peer_id, ip, port)
+        peer.connected = True
+        self._logger.info("Incoming connection with peer [{}] requesting torrent {}".format(peer, handshake.info_hash))
+
+        # Handshake recieved, lets make sure we're serving the torrent
+        torrent = next((t for t in self._torrents if t.data.info_hash == handshake.info_hash), None)
+        if torrent is None:
+            # Sorry we don't have that in stock right now
+            # Please come again
+            self._logger.warning(
+                "Dropped connection with peer [{}]. (Don't have torrent {})".format(peer, handshake.info_hash))
+            writer.close()
+            return
+
+        # Make sure we don't have too many connections
+        if len(torrent.peers) >= MAX_PEERS:
+            # Torrent machine broke
+            self._logger.info(
+                "Dropped connection with peer [{}]. (Reached MAX_PEERS)".format(peer)
+            )
+            # Understandable have a nice day
+            writer.close()
+            return
+
+        # Remove any duplicate peers
+        torrent.swarm = [p for p in torrent.swarm if p != peer]
+        # Add the new peer to the list
+        torrent.peers.append(peer)
+
+        # Send our handshake
+        writer.write(HandshakeMessage(torrent.info_hash, torrent.peer_id).encode())
+
+        self._loop.ensure_future(self.handle_peer(torrent, peer, reader, writer))
