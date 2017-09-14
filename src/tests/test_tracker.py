@@ -1,5 +1,6 @@
-from bridge.torrent import TorrentData
-from bridge.tracker import announce_tracker, generate_peer_id
+from bridge.data import TorrentData
+from bridge.tracker import announce_tracker
+from bridge.peer import generate_peer_id
 from collections import namedtuple
 import pytest
 

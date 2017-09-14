@@ -1,14 +1,10 @@
 """Contains functions and coroutines for the bit torrent protocol"""
-from . import bencoding, torrent, peer
+from . import bencoding, data, peer
 from typing import Optional
-from random import choices
 from urllib.parse import urlencode
 from pizza_utils.listutils import chunk
 import aiohttp
 import enum
-
-
-PEER_ID_PREFIX = "-BI0001-"
 
 
 class TrackerResponse():
@@ -86,7 +82,7 @@ class TrackerEvent(enum.Enum):
     completed = enum.auto()
 
 
-async def announce_tracker(torrent: torrent.Torrent,
+async def announce_tracker(torrent: 'data.Torrent',
                            announce_url: str,
                            compact: int = 1,
                            no_peer_id: int = 0,
@@ -147,10 +143,3 @@ async def announce_tracker(torrent: torrent.Torrent,
             else:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await resp.text()))
-
-
-def generate_peer_id(debug=False):
-    if debug:
-        return PEER_ID_PREFIX + "4" + "".join(map(str, choices(range(0, 10), k=11)))
-    else:
-        return PEER_ID_PREFIX + "1" + "".join(map(str, choices(range(0, 10), k=11)))

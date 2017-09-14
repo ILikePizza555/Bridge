@@ -35,7 +35,7 @@ class TorrentData:
         name        Name of the torrent.
         info_hash   A sha1 hash of the "info" dict.
         pieces      A tuple of the sha1 hashes of all the pieces.
-        announce    A tuple of the announce urls.
+        announce    A list of lists of the announce urls.
     """
 
     def __init__(self, filename):
@@ -91,16 +91,13 @@ class TorrentData:
             raise InvalidTorrentError(self.filename, "File does not contain piece data in 'info'")
 
     def _load_announce(self):
-        if "announce" in self:
-            if "announce-list" in self:
-                full_list = self["announce-list"]
+        self.announce = []
 
-                if self["announce"] not in self["announce-list"]:
-                    self["announce-list"].append(self["announce"]) 
-
-                self.announce = tuple(url.decode() for url in full_list)
-            else:
-                self.announce = (self["announce"].decode(),)
+        if "announce-list" in self:
+            for announce_list in self["announce-list"]:
+                self.announce.append([url.decode("utf-8") for url in announce_list])
+        elif "announce" in self:
+            self.announce.append([self["announce"].decode()])
         else:
             raise InvalidTorrentError(self.filename, "File does not contain announce.")
 
@@ -148,7 +145,11 @@ class Torrent:
     async def annnounce(self):
         self._logger.info("Beginning anounce...")
 
-        for announce_url in self.data.announce:
+        # TODO: Add support for backups
+        # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces fail in the first list
+        # Then, the sub-lists are rearragned so that the first successful trackers are first in their sub-lists
+        # http://bittorrent.org/beps/bep_0012.html
+        for announce_url in self.data.announce[0]:
             self._logger.info("Announcing on " + announce_url)
 
             peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
