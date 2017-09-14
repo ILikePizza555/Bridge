@@ -1,5 +1,5 @@
 from asyncio import StreamReader, StreamWriter
-from . import torrent, peer
+from . import data, peer
 import logging
 
 
@@ -10,13 +10,13 @@ class Client():
 
     def __init__(self, loop):
         self._loop = loop
-        self._torrents: list[Torrent] = []
+        self._torrents: list[data.Torrent] = []
         self._logger = logging.getLogger("bridge.peermanager")
 
-    def add_torrent(self, torrent: torrent.Torrent):
+    def add_torrent(self, torrent: data.Torrent):
         self._torrents.append(torrent)
 
-    async def handle_peer(self, torrent: torrent.Torrent, remote_peer: peer.Peer, reader: StreamReader, writer: StreamWriter):
+    async def handle_peer(self, torrent: data.Torrent, remote_peer: peer.Peer, reader: StreamReader, writer: StreamWriter):
         """
         Handles a peer client after proper initation procedures have been completed.
         """
