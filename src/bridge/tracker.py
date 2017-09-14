@@ -1,5 +1,5 @@
 """Contains functions and coroutines for the bit torrent protocol"""
-from . import bencoding, data, peer
+from . import bencoding, peer
 from typing import Optional
 from urllib.parse import urlencode
 from pizza_utils.listutils import chunk

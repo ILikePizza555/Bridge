@@ -1,21 +1,28 @@
 from bridge import client, data, peer
+from typing import List
 import asyncio
 import glob
 import logging
 import random
+import traceback
 
 DEBUG = True
 
+logging_format = "[%(levelname)s]\t{%(asctime)s}\t%(name)s: %(message)s"
+logging.basicConfig(filename="run.log", level=logging.INFO, format=logging_format)
 
-logging.basicConfig(filename="run.log", level=logging.INFO)
+bridge_logger = logging.getLogger("bridge")
+ch = logging.StreamHandler()
+ch.setFormatter(logging.Formatter("[%(name)s] - %(message)s"))
+ch.setLevel(logging.INFO)
+bridge_logger.addHandler(ch)
 
-
-logger = logging.getLogger("bridge.app")
+app_logger = logging.getLogger("bridge.app")
 peer_id = peer.generate_peer_id(debug=DEBUG)
 listen_port = random.randrange(6881, 6889)
 
 
-async def load_files() -> data.Torrent:
+async def load_files() -> List[data.Torrent]:
     torrent_list = glob.glob("./*.torrent")
     return [data.Torrent(f, peer_id, listen_port) for f in torrent_list]
 
@@ -28,12 +35,13 @@ async def start_app(loop: asyncio.AbstractEventLoop):
         asyncio.start_server(peer_client.on_incoming, port=listen_port, loop=loop)
 
         for t in await load_files():
-            logger.info("Adding torrent {}".format(t))
+            app_logger.info("Adding torrent {}".format(t))
 
             await t.announce()
             peer_client.add_torrent(t)
-    except Exception as e:
-        logger.critical("Shutdown due to error.", exc_info=True, stack_info=True)
+    except Exception:
+        traceback.print_exc()
+        app_logger.critical("Shutdown due to error.")
         loop.stop()
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split, chunk
 from . import bencoding, peer, tracker
+import aiohttp.client_exceptions
 import hashlib
 import logging
 import operator
@@ -124,8 +125,11 @@ class Torrent:
         self.swarm = []
         self.peers = []
 
-        self._logger = logging.getLogger("bridge.torrent." + self.data.name[:8])
+        self._logger = logging.getLogger("bridge.torrent." + self.data.name)
         self._announce_time = []
+
+    def __str__(self):
+        return "Torrent(name: {}, swarm: {}, peers: {})".format(self.data.name, len(self.swarm), len(self.peers))
 
     @property
     def uploaded(self) -> str:
@@ -142,7 +146,7 @@ class Torrent:
         # TODO: Implement
         return str(1)
 
-    async def annnounce(self):
+    async def announce(self):
         self._logger.info("Beginning anounce...")
 
         # TODO: Add support for backups
@@ -155,16 +159,20 @@ class Torrent:
             peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
             self._logger.info("Requesting {} peers".format(peer_count_request))
 
-            response = tracker.announce_tracker(self, announce_url, numwant=peer_count_request)
+            try:
+                response = await tracker.announce_tracker(self, announce_url, numwant=peer_count_request)
 
-            if not response.sucessful:
-                self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
+                if not response.sucessful:
+                    self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
+                    continue
+
+                self._logger.info("Announce successful.")
+
+                if peer_count_request > 0:
+                    # Dump all the peers into the swarm
+                    new_peers = [p for p in response.peers if p not in self.swarm]
+                    self.swarm.extend(new_peers)
+                    self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
+            except aiohttp.client_exceptions.ClientConnectionError:
+                self._logger.error("Failed to connect to tracker {}".format(announce_url))
                 continue
-
-            self._logger.info("Announce successful.")
-
-            if peer_count_request > 0:
-                # Dump all the peers into the swarm
-                new_peers = [p for p in response.peers if p not in self.swarm]
-                self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
-                self.swarm.extend(new_peers)
