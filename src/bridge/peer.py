@@ -227,7 +227,7 @@ class HandshakeMessage():
         info_hash = data[info_hash_index:peer_id_index]
         peer_id = data[peer_id_index:].decode()
 
-        return cls(pstring, reserved, info_hash, peer_id)
+        return cls(info_hash, peer_id, protocol_string=pstring, reserved=reserved)
 
     def __init__(self, info_hash: bytes, peer_id: str,
                  protocol_string: str = PROTOCOL_STRING, reserved: bytes = bytes(8)):

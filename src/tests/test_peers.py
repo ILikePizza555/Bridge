@@ -1,6 +1,7 @@
 from bridge import peer
 import asyncio
 import pytest
+import random
 
 _test_data = [
     (peer.KeepAlivePeerMessage(), bytes(4)),
@@ -66,3 +67,18 @@ async def test_single_stream_iteration(monkeypatch, buffer_data: bytes, expected
     # Actual test
     async for message in peer.PeerMessageIterator(test_reader):
         assert message == expected
+
+
+def test_decode_handshake():
+    pstrlen = bytes([len(peer.PROTOCOL_STRING)])
+    pstr = peer.PROTOCOL_STRING.encode()
+    reserved = bytes(8)
+    info_hash = bytes(random.choices(range(0, 16), k=20))
+    peer_id = "Test Peer IDaaaaaaaa"
+
+    data = pstrlen + pstr + reserved + info_hash + peer_id.encode()
+
+    actual = peer.HandshakeMessage.decode(data)
+
+    assert actual.info_hash == info_hash
+    assert actual.peer_id == peer_id
