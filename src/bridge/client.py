@@ -20,7 +20,7 @@ class Client():
         """
         Handles a peer client after proper initation procedures have been completed.
         """
-        for message in peer.PeerMessageIterator(reader):
+        async for message in peer.PeerMessageIterator(reader):
             print("Got message, " + str(message))
 
     async def on_incoming(self, reader: StreamReader, writer: StreamWriter):
@@ -48,7 +48,7 @@ class Client():
             return
 
         # Make sure we don't have too many connections
-        if len(torrent.remote_peers) >= peer.MAX_PEERS:
+        if len(torrent.peers) >= peer.MAX_PEERS:
             # Torrent machine broke
             self._logger.info(
                 "Dropped connection with peer [{}]. (Reached MAX_PEERS)".format(remote_peer)
@@ -63,6 +63,6 @@ class Client():
         torrent.peers.append(peer)
 
         # Send our handshake
-        writer.write(peer.HandshakeMessage(torrent.info_hash, torrent.peer_id).encode())
+        writer.write(peer.HandshakeMessage(torrent.data.info_hash, torrent.peer_id).encode())
 
-        self._loop.ensure_future(self.handle_peer(torrent, peer, reader, writer))
+        self._loop.create_task(self.handle_peer(torrent, peer, reader, writer))

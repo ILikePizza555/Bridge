@@ -112,15 +112,15 @@ class Torrent:
 
     Attributes:
         data        The TorrentData of the Torrent
-        peer_id     A bytes object that holds the peer_id for transmission
+        peer_id     A string that holds the peer_id
         port        The port this client is listening on
         swarm       A list of all the peers.
-        peers       A the peers the client is connected too
+        peers       A list of the peers the client is connected too
     """
 
     def __init__(self, filename: str, peer_id: str, port: int):
         self.data = TorrentData(filename)
-        self.peer_id = peer_id.encode()
+        self.peer_id = peer_id
         self.port = port
         self.swarm = []
         self.peers = []
