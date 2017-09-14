@@ -1,4 +1,4 @@
-from bridge import torrent, tracker, peer
+from bridge import data, tracker, peer
 import asyncio
 import glob
 import logging
@@ -11,9 +11,9 @@ peer_id = tracker.generate_peer_id(debug=DEBUG)
 listen_port = random.randrange(6881, 6889)
 
 
-async def load_files() -> torrent.Torrent:
+async def load_files() -> data.Torrent:
     torrent_list = glob.glob(".", "*.torrent")
-    return [torrent.Torrent(f, peer_id, listen_port) for f in torrent_list]
+    return [data.Torrent(f, peer_id, listen_port) for f in torrent_list]
 
 
 async def start_app(loop: asyncio.AbstractEventLoop):
