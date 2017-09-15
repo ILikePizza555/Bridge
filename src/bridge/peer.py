@@ -30,7 +30,7 @@ class PeerMessage():
         return cls
 
     def __str__(self):
-        return "PeerMessage(id: {}, length: {})".format(self.message_id, self.length)
+        return "{}(id: {}, length: {})".format(self.__class__.__name__, self.message_id, self.length)
 
     def __eq__(self, other):
         return self.message_id == other.message_id and self.length == other.length

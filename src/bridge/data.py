@@ -146,9 +146,9 @@ class Torrent:
         self._logger.info("Beginning anounce...")
 
         # TODO: Add support for backups
-        # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces fail in the first list
-        # Then, the sub-lists are rearragned so that the first successful trackers are first in their sub-lists
-        # http://bittorrent.org/beps/bep_0012.html
+        # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces
+        # fail in the first list. Then, the sub-lists are rearragned so that the first successful trackers are first in
+        # their sub-lists. http://bittorrent.org/beps/bep_0012.html
         for announce_url in self.data.announce[0]:
             self._logger.info("Announcing on " + announce_url)
 
