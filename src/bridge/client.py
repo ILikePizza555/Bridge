@@ -28,7 +28,13 @@ class Client():
         Handles a peer client after proper initation procedures have been completed.
         """
         async for message in peer.PeerMessageIterator(reader):
-            print("Got message, " + str(message))
+            if type(message) == peer.KeepAlivePeerMessage:
+                self._logger.debug("{}:{} <-- Keepalive".format(remote_peer.ip, remote_peer.port))
+                writer.write(peer.KeepAlivePeerMessage().encode())
+
+            message_string = "{}:{} --> {}".format(remote_peer.ip, remote_peer.port, message)
+            print(message_string)
+            self._logger.debug(message_string)
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
@@ -79,4 +85,4 @@ class Client():
         # Send our handshake
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
-        self.loop.create_task(self.handle_peer(torrent, peer, reader, writer))
+        self.loop.create_task(self.handle_peer(torrent, remote_peer, reader, writer))

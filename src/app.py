@@ -9,7 +9,7 @@ import traceback
 DEBUG = True
 
 logging_format = "[%(levelname)s]\t{%(asctime)s}\t%(name)s: %(message)s"
-logging.basicConfig(filename="run.log", level=logging.INFO, format=logging_format)
+logging.basicConfig(filename="run.log", level=logging.DEBUG, format=logging_format)
 
 bridge_logger = logging.getLogger("bridge")
 ch = logging.StreamHandler()
