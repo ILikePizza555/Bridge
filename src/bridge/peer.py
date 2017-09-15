@@ -1,6 +1,10 @@
+import logging
 import struct
 import socket
 import random
+
+
+logger = logging.getLogger("bridge.peer")
 
 
 PROTOCOL_STRING = "BitTorrent protocol"
@@ -204,6 +208,9 @@ class PeerMessageIterator():
             message_id = data[0]
 
             return PeerMessage.id_map[message_id].decode(data[1:])
+        except KeyError:
+            logger.error("No message found with id {}".format(message_id))
+            logger.debug("Full packet: {}".format(length_prefix + data))
         except ConnectionResetError:
             raise StopAsyncIteration()
 
@@ -222,7 +229,7 @@ class HandshakeMessage():
         info_hash_index = reserved_index + 8
         peer_id_index = info_hash_index + 20
 
-        pstring = data[1:reserved_index].decode()
+        pstring = data[1:reserved_index].decode("ascii")
         reserved = data[reserved_index:info_hash_index]
         info_hash = data[info_hash_index:peer_id_index]
         peer_id = data[peer_id_index:]
@@ -258,11 +265,9 @@ class Peer():
     @classmethod
     def from_bin(cls, binrep: bytes):
         """Builds a peer from the binary representation"""
-        ip = socket.inet_ntoa(binrep[:4])
-        # Port is a 2-byte big endian integer
-        port = struct.unpack(">H", binrep[4:])[0]
-
-        return cls(bytes(20), ip, port)
+        rv = cls(bytes(20), None, struct.unpack(">H", binrep[4:])[0])
+        rv.ip = socket.inet_ntoa(binrep[:4])
+        return rv
 
     @classmethod
     def from_str(cls, peer_id: bytes, ip: str, port: int):

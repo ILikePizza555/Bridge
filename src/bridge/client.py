@@ -20,7 +20,7 @@ class Client():
 
     async def add_torrent(self, torrent: data.Torrent):
         self._torrents.append(torrent)
-        await torrent.announce(self.port, self.peer_id)
+        await torrent.announce(self.listen_port, self.peer_id)
 
     async def handle_peer(self, torrent: data.Torrent, remote_peer: peer.Peer,
                           reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -37,7 +37,14 @@ class Client():
         # Get connection data
         ip, port = writer.get_extra_info("socket").getpeername()
         # Wait for the handshake
-        handshake = peer.HandshakeMessage.decode(await reader.read(49 + len(peer.PROTOCOL_STRING)))
+        try:
+            handshake = peer.HandshakeMessage.decode(await reader.read(49 + len(peer.PROTOCOL_STRING)))
+        except UnicodeDecodeError:
+            # There was an error decoding the handshake
+            # (likly the handshake was invalid)
+            self._logger.debug("Dropped connection with {}. (Invalid handshake)".format(ip))
+            writer.close()
+            return
 
         # Create a peer object to hold data
         remote_peer = peer.Peer.from_str(handshake.peer_id, ip, port)
@@ -49,7 +56,7 @@ class Client():
         if torrent is None:
             # Sorry we don't have that in stock right now
             # Please come again
-            self._logger.warning(
+            self._logger.info(
                 "Dropped connection with peer [{}]. (Don't have torrent {})".format(remote_peer, handshake.info_hash))
             writer.close()
             return
@@ -72,4 +79,4 @@ class Client():
         # Send our handshake
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
-        self._loop.create_task(self.handle_peer(torrent, peer, reader, writer))
+        self.loop.create_task(self.handle_peer(torrent, peer, reader, writer))
