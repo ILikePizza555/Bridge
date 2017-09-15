@@ -112,16 +112,12 @@ class Torrent:
 
     Attributes:
         data        The TorrentData of the Torrent
-        peer_id     A string that holds the peer_id
-        port        The port this client is listening on
         swarm       A list of all the peers.
         peers       A list of the peers the client is connected too
     """
 
-    def __init__(self, filename: str, peer_id: str, port: int):
+    def __init__(self, filename: str):
         self.data = TorrentData(filename)
-        self.peer_id = peer_id
-        self.port = port
         self.swarm = []
         self.peers = []
 
@@ -146,7 +142,7 @@ class Torrent:
         # TODO: Implement
         return str(1)
 
-    async def announce(self):
+    async def announce(self, port: int, peer_id: bytes):
         self._logger.info("Beginning anounce...")
 
         # TODO: Add support for backups
@@ -160,7 +156,7 @@ class Torrent:
             self._logger.info("Requesting {} peers".format(peer_count_request))
 
             try:
-                response = await tracker.announce_tracker(self, announce_url, numwant=peer_count_request)
+                response = await tracker.announce_tracker(self, peer_id, announce_url, port, numwant=peer_count_request)
 
                 if not response.sucessful:
                     self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))

@@ -74,9 +74,9 @@ def test_decode_handshake():
     pstr = peer.PROTOCOL_STRING.encode()
     reserved = bytes(8)
     info_hash = bytes(random.choices(range(0, 16), k=20))
-    peer_id = "Test Peer IDaaaaaaaa"
+    peer_id = "Test Peer IDaaaaaaaa".encode()
 
-    data = pstrlen + pstr + reserved + info_hash + peer_id.encode()
+    data = pstrlen + pstr + reserved + info_hash + peer_id
 
     actual = peer.HandshakeMessage.decode(data)
 

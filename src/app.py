@@ -18,27 +18,25 @@ ch.setLevel(logging.INFO)
 bridge_logger.addHandler(ch)
 
 app_logger = logging.getLogger("bridge.app")
-peer_id = peer.generate_peer_id(debug=DEBUG)
+peer_id = peer.generate_peer_id(debug=DEBUG).encode()
 listen_port = random.randrange(6881, 6889)
 
 
 async def load_files() -> List[data.Torrent]:
     torrent_list = glob.glob("./*.torrent")
-    return [data.Torrent(f, peer_id, listen_port) for f in torrent_list]
+    return [data.Torrent(f) for f in torrent_list]
 
 
 async def start_app(loop: asyncio.AbstractEventLoop):
     try:
         print("Starting app. Listening on port {}".format(listen_port))
 
-        peer_client = client.Client(loop)
-        await asyncio.start_server(peer_client.on_incoming, port=listen_port, loop=loop)
+        peer_client = client.Client(loop, peer_id, listen_port)
 
         for t in await load_files():
             app_logger.info("Adding torrent {}".format(t))
+            await peer_client.add_torrent(t)
 
-            await t.announce()
-            peer_client.add_torrent(t)
     except Exception:
         traceback.print_exc()
         app_logger.critical("Shutdown due to error.")

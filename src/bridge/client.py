@@ -1,5 +1,5 @@
-from asyncio import StreamReader, StreamWriter
 from . import data, peer
+import asyncio
 import logging
 
 
@@ -8,22 +8,29 @@ class Client():
     Manages peers, the connections to those peers, and the messages from those peers
     """
 
-    def __init__(self, loop):
-        self._loop = loop
+    def __init__(self, loop: asyncio.AbstractEventLoop, peer_id: bytes, listen_port: int):
+        self.loop = loop
+        self.peer_id = peer_id
+        self.listen_port = listen_port
+
         self._torrents: list[data.Torrent] = []
         self._logger = logging.getLogger("bridge.peermanager")
 
-    def add_torrent(self, torrent: data.Torrent):
-        self._torrents.append(torrent)
+        loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
 
-    async def handle_peer(self, torrent: data.Torrent, remote_peer: peer.Peer, reader: StreamReader, writer: StreamWriter):
+    async def add_torrent(self, torrent: data.Torrent):
+        self._torrents.append(torrent)
+        await torrent.announce(self.port, self.peer_id)
+
+    async def handle_peer(self, torrent: data.Torrent, remote_peer: peer.Peer,
+                          reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
         Handles a peer client after proper initation procedures have been completed.
         """
         async for message in peer.PeerMessageIterator(reader):
             print("Got message, " + str(message))
 
-    async def on_incoming(self, reader: StreamReader, writer: StreamWriter):
+    async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
         Performs the proper connection initalization for incoming peer connections.
         """
@@ -60,9 +67,9 @@ class Client():
         # Remove any duplicate peers
         torrent.swarm = [p for p in torrent.swarm if p != remote_peer]
         # Add the new peer to the list
-        torrent.peers.append(peer)
+        torrent.peers.append(remote_peer)
 
         # Send our handshake
-        writer.write(peer.HandshakeMessage(torrent.data.info_hash, torrent.peer_id).encode())
+        writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
         self._loop.create_task(self.handle_peer(torrent, peer, reader, writer))

@@ -83,7 +83,9 @@ class TrackerEvent(enum.Enum):
 
 
 async def announce_tracker(torrent: 'data.Torrent',
+                           peer_id: bytes,
                            announce_url: str,
+                           port: int,
                            compact: int = 1,
                            no_peer_id: int = 0,
                            key: Optional[int] = None,
@@ -107,8 +109,8 @@ async def announce_tracker(torrent: 'data.Torrent',
     """
     get_params = {
         "info_hash": torrent.data.info_hash,
-        "peer_id": torrent.peer_id,
-        "port": torrent.port,
+        "peer_id": peer_id,
+        "port": port,
         "uploaded": torrent.uploaded,
         "downloaded": torrent.downloaded,
         "left": torrent.left,

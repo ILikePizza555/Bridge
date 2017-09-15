@@ -225,11 +225,11 @@ class HandshakeMessage():
         pstring = data[1:reserved_index].decode()
         reserved = data[reserved_index:info_hash_index]
         info_hash = data[info_hash_index:peer_id_index]
-        peer_id = data[peer_id_index:].decode()
+        peer_id = data[peer_id_index:]
 
         return cls(info_hash, peer_id, protocol_string=pstring, reserved=reserved)
 
-    def __init__(self, info_hash: bytes, peer_id: str,
+    def __init__(self, info_hash: bytes, peer_id: bytes,
                  protocol_string: str = PROTOCOL_STRING, reserved: bytes = bytes(8)):
         self.info_hash = info_hash
         self.peer_id = peer_id
@@ -238,7 +238,7 @@ class HandshakeMessage():
 
     def encode(self) -> bytes:
         pstr_header = bytes([len(self.protocol_string)]) + self.protocol_string.encode()
-        return pstr_header + self.reserved + self.info_hash + self.peer_id.encode()
+        return pstr_header + self.reserved + self.info_hash + self.peer_id
 
 
 class Peer():
@@ -258,23 +258,20 @@ class Peer():
     @classmethod
     def from_bin(cls, binrep: bytes):
         """Builds a peer from the binary representation"""
-        rv = cls(None, None, 0)
-
-        rv.ip = socket.inet_ntoa(binrep[:4])
+        ip = socket.inet_ntoa(binrep[:4])
         # Port is a 2-byte big endian integer
-        rv.port = struct.unpack(">H", binrep[4:])[0]
+        port = struct.unpack(">H", binrep[4:])[0]
 
-        return rv
+        return cls(bytes(20), ip, port)
 
     @classmethod
-    def from_str(cls, peer_id: str, ip: str, port: int):
-        rv = cls(None, None, port)
-        rv.peer_id = peer_id
+    def from_str(cls, peer_id: bytes, ip: str, port: int):
+        rv = cls(peer_id, None, port)
         rv.ip = ip
         return rv
 
     def __init__(self, peer_id: bytes, ip: bytes, port: int):
-        self.peer_id = peer_id.decode("utf-8") if peer_id is not None else None
+        self.peer_id = peer_id
         self.ip = ip.decode("utf-8") if ip is not None else None
         self.port = port
 
