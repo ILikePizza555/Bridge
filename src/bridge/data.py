@@ -2,6 +2,7 @@
 from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split, chunk
+from typing import Optional
 from . import bencoding, peer, tracker
 import aiohttp.client_exceptions
 import hashlib
@@ -70,6 +71,9 @@ class TorrentData:
 
         return k[0] in reduce(operator.getitem, key_split, self._meta)
 
+    def __str__(self):
+        return "TorrentData - Filename: {}, Info Hash: {}".format(self.filename, self.info_hash)
+
     def _load_files(self):
         if "info.files" in self:
             rv = []
@@ -102,8 +106,26 @@ class TorrentData:
         else:
             raise InvalidTorrentError(self.filename, "File does not contain announce.")
 
-    def __str__(self):
-        return "TorrentData - Filename: {}, Info Hash: {}".format(self.filename, self.info_hash)
+
+class Piece():
+    """
+    Class that represents a piece, and provides a buffer for downloading.
+    """
+
+    def __init__(self, piece_hash: bytes, piece_size: Optional[int]):
+        self.piece_hash = piece_hash
+
+        self.buffer = bytearray(piece_size)
+
+        self.downloaded = False
+        self.verified = False
+    
+    def verify(self) -> bool:
+        if hashlib.sha1(self.buffer).digest() == self.piece_hash:
+            self.verified = True
+            return True
+        else:
+            return False
 
 
 class Torrent:
@@ -120,6 +142,8 @@ class Torrent:
         self.data = TorrentData(filename)
         self.swarm = []
         self.peers = []
+
+        self.pieces = (Piece(ph, self.data["piece length"]) for ph in self.data.pieces)
 
         self._logger = logging.getLogger("bridge.torrent." + self.data.name)
         self._announce_time = []
