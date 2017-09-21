@@ -28,13 +28,19 @@ class Client():
         Handles a peer client after proper initation procedures have been completed.
         """
         async for message in peer.PeerMessageIterator(reader):
-            if type(message) == peer.KeepAlivePeerMessage:
-                self._logger.debug("{}:{} <-- Keepalive".format(remote_peer.ip, remote_peer.port))
-                writer.write(peer.KeepAlivePeerMessage().encode())
+            self._logger.debug("Recieved {} from {}:{}".format(message, remote_peer.ip, remote_peer.port))
 
-            message_string = "{}:{} --> {}".format(remote_peer.ip, remote_peer.port, message)
-            print(message_string)
-            self._logger.debug(message_string)
+            if type(message) == peer.KeepAlivePeerMessage:
+                self._logger.debug("Writing keepalive back")
+                writer.write(peer.KeepAlivePeerMessage().encode())
+            elif type(message) == peer.ChokePeerMessage:
+                remote_peer.is_choking = True
+            elif type(message) == peer.UnchokePeerMessage:
+                remote_peer.is_choking = False
+            elif type(message) == peer.InterestedPeerMessage:
+                remote_peer.is_interested = True
+            elif type(message) == peer.NotInterestedPeerMessage:
+                remote_peer.is_interested = False
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """

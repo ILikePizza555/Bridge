@@ -258,8 +258,8 @@ class Peer():
         - port              The port the peer is listening on
         - am_choking        Is this client choking the peer
         - am_interested     Is this client interested in the peer
-        - peer_choking      Is the peer choking the client
-        - peer_interested   Is the peer interested in the client
+        - is_choking        Is the peer choking the client
+        - is_interested     Is the peer interested in the client
     """
 
     @classmethod
@@ -281,10 +281,11 @@ class Peer():
         self.port = port
 
         self.connected = False
+        
         self.am_choking = True
         self.am_interested = False
-        self.peer_choking = True
-        self.peer_interested = False
+        self.is_choking = True
+        self.is_interested = False
 
     def __eq__(self, other):
         return self.ip == other.ip and self.port == other.port
