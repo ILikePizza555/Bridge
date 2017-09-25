@@ -2,11 +2,13 @@
 from functools import reduce
 from collections import namedtuple
 from pizza_utils.listutils import split, chunk
-from typing import Optional
+from pizza_utils.bitfield import Bitfield
+from typing import Optional, Tuple
 from . import bencoding, peer, tracker
 import aiohttp.client_exceptions
 import hashlib
 import logging
+import math
 import operator
 
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
@@ -110,22 +112,58 @@ class TorrentData:
 class Piece():
     """
     Class that represents a piece, and provides a buffer for downloading.
+
+    Attributes:
+        downloaded      The piece's data has been downloaded, but not saved
+        verified        The piece's data has been downloaded and verified, but not saved
+        saved           The piece has been downloaded, verified, and saved.
     """
 
     def __init__(self, piece_hash: bytes, piece_size: Optional[int]):
         self.piece_hash = piece_hash
+        self.piece_size = piece_size
 
-        self.buffer = bytearray(piece_size)
+        self.buffer = bytearray()
 
         self.downloaded = False
         self.verified = False
+        self.saved = False
+
+    def __repr__(self):
+        if self.downloaded:
+            return "Piece {hash}: {buffer}".format(self.piece_hash, self.buffer)
+        elif self.verified:
+            return "Piece (v) {hask}: {buffer}".format(self.piece_hash, self.buffer)
+        elif self.downloaded:
+            return "Piece (v,s) {hask}: {buffer}".format(self.piece_hash, self.buffer)
+        else:
+            return "Piece {hash}".format(self.piece_hash)
+
+    async def download(self, offset: int, data: bytes):
+        self.buffer[offset:offset + len(data)] = data
+
+        if len(self.buffer) == self.piece_size:
+            self.downloaded = True
     
-    def verify(self) -> bool:
+    async def verify(self) -> bool:
         if hashlib.sha1(self.buffer).digest() == self.piece_hash:
             self.verified = True
             return True
         else:
             return False
+
+    async def save(self, file: TorrentFile, offset: int = 0):
+        byte_offset = offset * self.piece_size
+
+        with open(file.path + file.name, mode="w+b") as fh:
+            fh.seek(byte_offset)
+            fh.write(self.buffer)
+        
+        # Clean up and free memory
+        del self.buffer
+        self.buffer = bytearray()
+
+        self.saved = True
 
 
 class Torrent:
@@ -133,9 +171,11 @@ class Torrent:
     Class for storing Torrent state.
 
     Attributes:
-        data        The TorrentData of the Torrent
-        swarm       A list of all the peers.
-        peers       A list of the peers the client is connected too
+        data            The TorrentData of the Torrent
+        swarm           A list of all the peers.
+        peers           A list of the peers the client is connected too
+        pieces          A list of the pieces
+        file_indexes    A map of piece indexes and files
     """
 
     def __init__(self, filename: str):
@@ -144,12 +184,23 @@ class Torrent:
         self.peers = []
 
         self.pieces = (Piece(ph, self.data["piece length"]) for ph in self.data.pieces)
+        # File indexes are basically pointers to items in the pieces list
+        # They're indicators of which pieces correspond to which files
+        self.file_indexes = self._calculate_file_indexes()
 
         self._logger = logging.getLogger("bridge.torrent." + self.data.name)
         self._announce_time = []
 
     def __str__(self):
         return "Torrent(name: {}, swarm: {}, peers: {})".format(self.data.name, len(self.swarm), len(self.peers))
+
+    def _calculate_file_indexes(self):
+        rv = {}
+        next_index = 0
+
+        for file in self.data.files:
+            rv[next_index] = file
+            next_index = next_index + math.ceil(file.size / self.data["piece length"])
 
     @property
     def uploaded(self) -> str:
@@ -165,6 +216,39 @@ class Torrent:
     def left(self) -> str:
         # TODO: Implement
         return str(1)
+
+    @property
+    def bitfield(self) -> Bitfield:
+        rv = Bitfield()
+        for p in self.pieces:
+            if p.saved:
+                rv[0] = 1
+            else:
+                rv = rv << 1
+        
+        return rv
+
+    def get_piece_file(self, i: int) -> Tuple[int, TorrentFile]:
+        for index, file in reversed(self.file_indexes):
+            if i > index:
+                return (index, file)
+
+    async def recieve_piece(self, piece_index: int, offset: int, data: bytes):
+        p: Piece = self.pieces[piece_index]
+
+        await p.download(offset, data)
+
+        if p.downloaded:
+            self._logger.debug("Downloaded {}".format(p))
+
+            if await p.verify():
+                self._logger.debug("Verified {}".format(p))
+
+                f_index, f = self.get_piece_file(piece_index)
+                piece_offset = piece_index - f_index
+
+                self._logger.debug("Saving {} to {} offset {}".format(p, f, piece_offset))
+                p.save(f, piece_offset)
 
     async def announce(self, port: int, peer_id: bytes):
         self._logger.info("Beginning anounce...")

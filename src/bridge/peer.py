@@ -1,3 +1,4 @@
+from pizza_utils.bitfield import Bitfield
 import logging
 import struct
 import socket
@@ -279,6 +280,8 @@ class Peer():
         self.peer_id = peer_id
         self.ip = ip.decode("utf-8") if ip is not None else None
         self.port = port
+
+        self.piecefield = Bitfield(0)
 
         self.connected = False
         

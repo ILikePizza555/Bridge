@@ -1,4 +1,5 @@
 from . import data, peer
+from pizza_utils.bitfield import Bitfield
 import asyncio
 import logging
 
@@ -41,6 +42,17 @@ class Client():
                 remote_peer.is_interested = True
             elif type(message) == peer.NotInterestedPeerMessage:
                 remote_peer.is_interested = False
+            elif type(message) == peer.HavePeerMessage:
+                print("Piecefield before: " + remote_peer.piecefield)
+                remote_peer.piecefield[message.piece_index] = 1
+                print("Piecefield after: " + remote_peer.piecefield)
+            elif type(message) == peer.BitfieldPeerMessage:
+                num = int.from_bytes(message.bitfield)
+                remote_peer.piecefield = Bitfield(num)
+            elif type(message) == peer.RequestPeerMessage:
+                pass
+            elif type(message) == peer.BlockPeerMessage:
+                await torrent.recieve_piece(message.piece_index, message.offset, message.data)
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
@@ -90,5 +102,8 @@ class Client():
 
         # Send our handshake
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
+
+        # It's customary to send a bitfield message right afterwards
+        writer.write(peer.BitfieldPeerMessage(torrent.bitfield).encode())
 
         self.loop.create_task(self.handle_peer(torrent, remote_peer, reader, writer))
