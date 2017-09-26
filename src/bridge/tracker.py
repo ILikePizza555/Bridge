@@ -111,9 +111,9 @@ async def announce_tracker(torrent: 'data.Torrent',
         "info_hash": torrent.data.info_hash,
         "peer_id": peer_id,
         "port": port,
-        "uploaded": torrent.uploaded,
-        "downloaded": torrent.downloaded,
-        "left": torrent.left,
+        "uploaded": str(torrent.total_uploaded),
+        "downloaded": str(torrent.total_downloaded),
+        "left": str(torrent.left),
         "compact": compact,
         "no_peer_id": no_peer_id
     }

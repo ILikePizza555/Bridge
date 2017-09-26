@@ -55,6 +55,8 @@ class TorrentData:
             self._load_pieces()
             self._load_announce()
 
+        self.total_size = sum(i.size for i in self.files)
+
     def __getitem__(self, key):
         if not isinstance(key, str):
             raise TypeError("Key must be string")
@@ -183,6 +185,9 @@ class Torrent:
         self.swarm = []
         self.peers = []
 
+        self.total_uploaded = 0
+        self.total_downloaded = 0
+
         self.pieces = (Piece(ph, self.data["piece length"]) for ph in self.data.pieces)
         # File indexes are basically pointers to items in the pieces list
         # They're indicators of which pieces correspond to which files
@@ -194,6 +199,22 @@ class Torrent:
     def __str__(self):
         return "Torrent(name: {}, swarm: {}, peers: {})".format(self.data.name, len(self.swarm), len(self.peers))
 
+    @property
+    def downloaded(self) -> int:
+        rv = 0
+        for p in self.pieces:
+            if p.saved:
+                rv = rv + p.piece_size
+        return rv
+
+    @property
+    def left(self) -> int:
+        rv = 0
+        for p in self.pieces:
+            if not p.verified:
+                rv = rv + p.piece_size
+        return rv
+    
     def _calculate_file_indexes(self):
         rv = {}
         next_index = 0
@@ -201,21 +222,6 @@ class Torrent:
         for file in self.data.files:
             rv[next_index] = file
             next_index = next_index + math.ceil(file.size / self.data["piece length"])
-
-    @property
-    def uploaded(self) -> str:
-        # TODO: Implement
-        return str(0)
-
-    @property
-    def downloaded(self) -> str:
-        # TODO: Implement
-        return str(0)
-
-    @property
-    def left(self) -> str:
-        # TODO: Implement
-        return str(1)
 
     @property
     def bitfield(self) -> Bitfield:
@@ -234,7 +240,9 @@ class Torrent:
                 return (index, file)
 
     async def recieve_piece(self, piece_index: int, offset: int, data: bytes):
+        """Handler for recieving a block of data"""
         p: Piece = self.pieces[piece_index]
+        self.downloaded = self.downloaded + len(data)
 
         await p.download(offset, data)
 
@@ -242,6 +250,7 @@ class Torrent:
             self._logger.debug("Downloaded {}".format(p))
 
             if await p.verify():
+                # The piece has been fully downloaded and verified, save to disk
                 self._logger.debug("Verified {}".format(p))
 
                 f_index, f = self.get_piece_file(piece_index)
@@ -249,6 +258,9 @@ class Torrent:
 
                 self._logger.debug("Saving {} to {} offset {}".format(p, f, piece_offset))
                 p.save(f, piece_offset)
+            else:
+                # TODO: Implement throwing out pieces
+                pass
 
     async def announce(self, port: int, peer_id: bytes):
         self._logger.info("Beginning anounce...")

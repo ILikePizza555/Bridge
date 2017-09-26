@@ -53,6 +53,11 @@ class Client():
                 pass
             elif type(message) == peer.BlockPeerMessage:
                 await torrent.recieve_piece(message.piece_index, message.offset, message.data)
+                
+                # Logging
+                p = torrent.downloaded / torrent.data.total_size * 100
+                print("{}\n{}% done {} bytes downloaded, {} bytes left"
+                      .format(torrent, p, torrent.downloaded, torrent.left))
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
