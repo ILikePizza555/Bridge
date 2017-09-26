@@ -19,6 +19,18 @@ class Client():
 
         loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
 
+    def generate_response(self, torrent: data.Torrent, remote_peer: peer.Peer) -> peer.PeerMessage:
+        # General unchoke/choke stuff
+        if remote_peer.am_choking is True and remote_peer.is_choking is False:
+            remote_peer.am_choking = False
+            return peer.UnchokePeerMessage()
+
+        # If we're not interested, let them know we are
+        # TODO: Make this dependent on torrent state
+        if remote_peer.am_interested is False:
+            remote_peer.am_interested = True
+            return peer.InterestedPeerMessage()
+
     async def add_torrent(self, torrent: data.Torrent):
         self._torrents.append(torrent)
         await torrent.announce(self.listen_port, self.peer_id)
@@ -63,6 +75,11 @@ class Client():
                 p = torrent.downloaded / torrent.data.total_size * 100
                 print("{}\n{}% done {} bytes downloaded, {} bytes left"
                       .format(torrent, p, torrent.downloaded, torrent.left))
+
+            # Send our response
+            response = self.generate_response(torrent, remote_peer)
+            if response is not None:
+                writer.write(response.encode())
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
