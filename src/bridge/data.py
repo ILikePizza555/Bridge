@@ -10,6 +10,7 @@ import hashlib
 import logging
 import math
 import operator
+import random
 
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
 
@@ -192,6 +193,9 @@ class Torrent:
         # File indexes are basically pointers to items in the pieces list
         # They're indicators of which pieces correspond to which files
         self.file_indexes = self._calculate_file_indexes()
+
+        # Unique key to identify the torrent
+        self.key = bytes(random.sample(range(0, 256), 8))
 
         self._logger = logging.getLogger("bridge.torrent." + self.data.name)
         self._announce_time = []

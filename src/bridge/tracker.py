@@ -88,7 +88,6 @@ async def announce_tracker(torrent: 'data.Torrent',
                            port: int,
                            compact: int = 1,
                            no_peer_id: int = 0,
-                           key: Optional[int] = None,
                            trackerid: Optional[str] = None,
                            event: Optional[TrackerEvent] = None,
                            ip: Optional[str] = None,
@@ -114,6 +113,7 @@ async def announce_tracker(torrent: 'data.Torrent',
         "uploaded": str(torrent.total_uploaded),
         "downloaded": str(torrent.total_downloaded),
         "left": str(torrent.left),
+        "key": torrent.key,
         "compact": compact,
         "no_peer_id": no_peer_id
     }
@@ -126,9 +126,6 @@ async def announce_tracker(torrent: 'data.Torrent',
 
     if numwant is not None:
         get_params["numwant"] = numwant
-
-    if key is not None:
-        get_params["key"] = key
 
     if trackerid is not None:
         get_params["trackerid"] = trackerid
