@@ -215,7 +215,7 @@ class Torrent:
         self.total_uploaded = 0
         self.total_downloaded = 0
 
-        self.pieces = (Piece(ph, self.data["info.piece length"]) for ph in self.data.pieces)
+        self.pieces = tuple(Piece(ph, self.data["info.piece length"]) for ph in self.data.pieces)
         self.downloading = []
         # File indexes are basically pointers to items in the pieces list
         # They're indicators of which pieces correspond to which files

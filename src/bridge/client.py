@@ -137,8 +137,12 @@ class Client():
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
         # It's customary to send a bitfield message right afterwards
-        writer.write(peer.BitfieldPeerMessage(bytes(torrent.bitfield)).encode())
+        padding = bytes([0] * (len(torrent.pieces) - len(torrent.bitfield)))
+        payload = bytes(torrent.bitfield) + padding
+        self._logger.debug("Sending {} + {} NULL (size: {})".format(torrent.bitfield, len(padding), len(payload)))
+        writer.write(peer.BitfieldPeerMessage(payload).encode())
 
+        # Pass the rest of the process to the handler
         handler_logger = self._logger.getChild(str(remote_peer.peer_id))
         handler = self.handle_peer(torrent, remote_peer, reader, writer, handler_logger)
         self.loop.create_task(handler)
