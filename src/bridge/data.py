@@ -274,6 +274,7 @@ class Torrent:
         for i in self.downloading:
             if remote_peer.piecefield[i] > 0:
                 offset = len(self.pieces[i].buffer)
+                self._logger.debug("Asking for piece {} at offset {} from {}".format(i, offset, remote_peer))
                 return peer.RequestPeerMessage(i, offset, BLOCK_REQUEST_SIZE)
 
         rp = calculate_rarity(self.swarm, len(self.pieces))
@@ -282,6 +283,7 @@ class Torrent:
         for r in rarity:
             for i in r:
                 if remote_peer.piecefield[i] > 0:
+                    self._logger.debug("Asking for piece {} from {}".format(i, remote_peer))
                     return peer.RequestPeerMessage(i, 0, BLOCK_REQUEST_SIZE)
 
     async def recieve_block(self, piece_index: int, offset: int, data: bytes):
@@ -303,9 +305,15 @@ class Torrent:
                 piece_offset = piece_index - f_index
 
                 self._logger.debug("Saving {} to {} offset {}".format(p, f, piece_offset))
-                p.save(f, piece_offset)
 
-                self.downloading.remove(piece_index)
+                try:
+                    p.save(f, piece_offset)
+                    self._logger.info("Successfully downloaded piece {}.".format_map(piece_index))
+                except OSError:
+                    self._logger.warn("Error downloading piece {}. Discarding.")
+                    p.recycle()
+                finally:
+                    self.downloading.remove(piece_index)
             else:
                 self._logger.debug("Piece {} failed to verify. Recycling.".format(p))
                 p.recycle()
