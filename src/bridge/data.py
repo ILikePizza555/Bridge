@@ -1,6 +1,6 @@
 """Classes for managing bit torrent data"""
 from functools import reduce
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from pizza_utils.listutils import split, chunk
 from pizza_utils.bitfield import Bitfield
 from typing import Optional, Tuple
@@ -12,7 +12,28 @@ import math
 import operator
 import random
 
+BLOCK_REQUEST_SIZE = 2**15  # Bytes
+
+
 TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
+
+
+def calculate_rarity(peer_list: list, piece_count: int):
+    """Maps rarity to a list of piece indexes"""
+    pieces = {}
+
+    for i in range(0, piece_count):
+        rarity = 0
+        for p in peer_list:
+            if p.piecefield[i] > 0:
+                rarity = rarity + 1
+
+        if rarity in pieces:
+            pieces[rarity].append(i)
+        else:
+            pieces[rarity] = [i]
+
+    return pieces
 
 
 class InvalidTorrentError(Exception):
@@ -126,11 +147,7 @@ class Piece():
         self.piece_hash = piece_hash
         self.piece_size = piece_size
 
-        self.buffer = bytearray()
-
-        self.downloaded = False
-        self.verified = False
-        self.saved = False
+        self.recycle()
 
     def __repr__(self):
         if self.downloaded:
@@ -141,6 +158,15 @@ class Piece():
             return "Piece (v,s) {hask}: {buffer}".format(self.piece_hash, self.buffer)
         else:
             return "Piece {hash}".format(self.piece_hash)
+
+    def next_offset(self) -> int:
+        return self.piece_size - len(self.data)
+
+    def recycle(self):
+        self.buffer = bytearray()
+        self.downloaded = False
+        self.verified = False
+        self.saved = False
 
     async def download(self, offset: int, data: bytes):
         self.buffer[offset:offset + len(data)] = data
@@ -190,6 +216,7 @@ class Torrent:
         self.total_downloaded = 0
 
         self.pieces = (Piece(ph, self.data["info.piece length"]) for ph in self.data.pieces)
+        self.downloading = []
         # File indexes are basically pointers to items in the pieces list
         # They're indicators of which pieces correspond to which files
         self.file_indexes = self._calculate_file_indexes()
@@ -243,9 +270,24 @@ class Torrent:
             if i > index:
                 return (index, file)
 
-    async def recieve_piece(self, piece_index: int, offset: int, data: bytes):
+    def ask_for_block(self, remote_peer) -> peer.PeerMessage:
+        for i in self.downloading:
+            if remote_peer.piecefield[i] > 0:
+                offset = len(self.pieces[i].buffer)
+                return peer.RequestPeerMessage(i, offset, BLOCK_REQUEST_SIZE)
+
+        rp = calculate_rarity(self.swarm, len(self.pieces))
+        rarity = sorted(rp.keys(), reverse=True)
+
+        for r in rarity:
+            for i in r:
+                if remote_peer.piecefield[i] > 0:
+                    return peer.RequestPeerMessage(i, 0, BLOCK_REQUEST_SIZE)
+
+    async def recieve_block(self, piece_index: int, offset: int, data: bytes):
         """Handler for recieving a block of data"""
         p: Piece = self.pieces[piece_index]
+        self.downloading.append(piece_index)
         self.downloaded = self.downloaded + len(data)
 
         await p.download(offset, data)
@@ -262,9 +304,11 @@ class Torrent:
 
                 self._logger.debug("Saving {} to {} offset {}".format(p, f, piece_offset))
                 p.save(f, piece_offset)
+
+                self.downloading.remove(piece_index)
             else:
-                # TODO: Implement throwing out pieces
-                pass
+                self._logger.debug("Piece {} failed to verify. Recycling.".format(p))
+                p.recycle()
 
     async def announce(self, port: int, peer_id: bytes):
         self._logger.info("Beginning anounce...")

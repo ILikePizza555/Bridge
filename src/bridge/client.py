@@ -1,5 +1,6 @@
 from . import data, peer
 from pizza_utils.bitfield import Bitfield
+from typing import List
 import asyncio
 import logging
 
@@ -32,6 +33,9 @@ class Client():
             self._logger.debug("Sending interest to peer {}".format(remote_peer))
             remote_peer.am_interested = True
             return peer.InterestedPeerMessage()
+
+        # Start asking for pieces
+        return torrent.ask_for_block(remote_peer)
 
     async def add_torrent(self, torrent: data.Torrent):
         self._torrents.append(torrent)
@@ -70,8 +74,8 @@ class Client():
             elif type(message) == peer.RequestPeerMessage:
                 pass
             elif type(message) == peer.BlockPeerMessage:
-                await torrent.recieve_piece(message.piece_index, message.offset, message.data)
                 logging.debug("Recieved block {} offset {}".format(message.piece_index, message.offset))
+                await torrent.recieve_block(message.piece_index, message.offset, message.data)
 
                 # Logging
                 p = torrent.downloaded / torrent.data.total_size * 100
