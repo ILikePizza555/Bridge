@@ -226,6 +226,7 @@ class Torrent:
 
         self._logger = logging.getLogger("bridge.torrent." + self.data.name)
         self._announce_time = []
+        self._celebrate = False
 
     def __str__(self):
         return "Torrent(name: {}, swarm: {}, peers: {})".format(self.data.name, len(self.swarm), len(self.peers))
@@ -282,7 +283,7 @@ class Torrent:
 
         for r in rarity:
             for i in rp[r]:
-                if remote_peer.piecefield[i] > 0:
+                if remote_peer.piecefield[i] > 0 and i not in self.downloading and not self.pieces[i].verified:
                     self._logger.debug("Asking for piece {} from {}".format(i, remote_peer))
                     return peer.RequestPeerMessage(i, 0, BLOCK_REQUEST_SIZE)
 
@@ -290,7 +291,7 @@ class Torrent:
         """Handler for recieving a block of data"""
         p: Piece = self.pieces[piece_index]
         self.downloading.append(piece_index)
-        self.downloaded = self.downloaded + len(data)
+        self.total_downloaded = self.total_downloaded + len(data)
 
         await p.download(offset, data)
 
@@ -309,6 +310,14 @@ class Torrent:
                 try:
                     p.save(f, piece_offset)
                     self._logger.info("Successfully downloaded piece {}.".format_map(piece_index))
+
+                    # Because why not
+                    if self._celebrate is False:
+                        print("Congrats! You just downloaded your first piece! :)")
+                        print("Here it is:")
+                        print(p.buffer)
+
+                        self._celebrate = True
                 except OSError:
                     self._logger.warn("Error downloading piece {}. Discarding.")
                     p.recycle()

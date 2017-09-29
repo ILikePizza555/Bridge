@@ -3,6 +3,7 @@ from pizza_utils.bitfield import Bitfield
 from typing import List
 import asyncio
 import logging
+import math
 
 
 class Client():
@@ -16,17 +17,11 @@ class Client():
         self.listen_port = listen_port
 
         self._torrents: list[data.Torrent] = []
-        self._logger = logging.getLogger("bridge.peermanager")
+        self._logger = logging.getLogger("bridge.client")
 
         loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
 
     def generate_response(self, torrent: data.Torrent, remote_peer: peer.Peer) -> peer.PeerMessage:
-        # General unchoke/choke stuff
-        if remote_peer.am_choking is True and remote_peer.is_choking is False:
-            self._logger.debug("Unchoking peer {}".format(remote_peer))
-            remote_peer.am_choking = False
-            return peer.UnchokePeerMessage()
-
         # If we're not interested, let them know we are
         # TODO: Make this dependent on torrent state
         if remote_peer.am_interested is False:
@@ -34,8 +29,9 @@ class Client():
             remote_peer.am_interested = True
             return peer.InterestedPeerMessage()
 
-        # Start asking for pieces
-        return torrent.ask_for_block(remote_peer)
+        # If we're being choked we can't ask for pieces
+        if remote_peer.is_choking is False:
+            return torrent.ask_for_block(remote_peer)
 
     async def add_torrent(self, torrent: data.Torrent):
         self._torrents.append(torrent)
@@ -69,18 +65,18 @@ class Client():
                 logger.debug("New piecefield {}".format(remote_peer.piecefield))
             elif type(message) == peer.BitfieldPeerMessage:
                 b = Bitfield(int.from_bytes(message.bitfield, byteorder="big"))
-                logger.debug("Recieved bitfield {}".format(b))
+                logger.debug("Recieved bitfield (size {}) {}".format(len(b), b))
                 remote_peer.piecefield = b
             elif type(message) == peer.RequestPeerMessage:
                 pass
             elif type(message) == peer.BlockPeerMessage:
-                logging.debug("Recieved block {} offset {}".format(message.piece_index, message.offset))
-                await torrent.recieve_block(message.piece_index, message.offset, message.data)
+                logging.debug("Recieved block {} offset {}".format(message.index, message.begin))
+                await torrent.recieve_block(message.index, message.begin, message.block)
 
                 # Logging
                 p = torrent.downloaded / torrent.data.total_size * 100
-                print("{}\n{}% done {} bytes downloaded, {} bytes left"
-                      .format(torrent, p, torrent.downloaded, torrent.left))
+                print("{}\n{}% done {} total bytes downloaded, {} bytes left"
+                      .format(torrent, p, torrent.total_downloaded, torrent.left))
 
             # Send our response
             response = self.generate_response(torrent, remote_peer)
@@ -121,7 +117,7 @@ class Client():
         # Make sure we don't have too many connections
         if len(torrent.peers) >= peer.MAX_PEERS:
             # Torrent machine broke
-            self._logger.info(
+            self._logger.debug(
                 "Dropped connection with peer [{}]. (Reached MAX_PEERS)".format(remote_peer)
             )
             # Understandable have a nice day
@@ -137,7 +133,8 @@ class Client():
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
         # It's customary to send a bitfield message right afterwards
-        padding = bytes([0] * (len(torrent.pieces) - len(torrent.bitfield)))
+        a = (len(torrent.pieces) - len(torrent.bitfield) - 1)
+        padding = bytes([0] * math.floor(a / 8))
         payload = bytes(torrent.bitfield) + padding
         self._logger.debug("Sending {} + {} NULL (size: {})".format(torrent.bitfield, len(padding), len(payload)))
         writer.write(peer.BitfieldPeerMessage(payload).encode())
