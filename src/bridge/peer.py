@@ -211,7 +211,6 @@ class PeerMessageIterator():
             return PeerMessage.id_map[message_id].decode(data[1:])
         except KeyError:
             logger.error("No message found with id {}".format(message_id))
-            logger.debug("Full packet: {}".format(length_prefix + data))
         except ConnectionResetError:
             raise StopAsyncIteration()
 
