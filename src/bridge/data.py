@@ -281,7 +281,7 @@ class Torrent:
         rarity = sorted(rp.keys(), reverse=True)
 
         for r in rarity:
-            for i in r:
+            for i in rp[r]:
                 if remote_peer.piecefield[i] > 0:
                     self._logger.debug("Asking for piece {} from {}".format(i, remote_peer))
                     return peer.RequestPeerMessage(i, 0, BLOCK_REQUEST_SIZE)
