@@ -189,7 +189,7 @@ class Torrent:
         self.total_uploaded = 0
         self.total_downloaded = 0
 
-        self.pieces = (Piece(ph, self.data["piece length"]) for ph in self.data.pieces)
+        self.pieces = (Piece(ph, self.data["info.piece length"]) for ph in self.data.pieces)
         # File indexes are basically pointers to items in the pieces list
         # They're indicators of which pieces correspond to which files
         self.file_indexes = self._calculate_file_indexes()
@@ -225,7 +225,7 @@ class Torrent:
 
         for file in self.data.files:
             rv[next_index] = file
-            next_index = next_index + math.ceil(file.size / self.data["piece length"])
+            next_index = next_index + math.ceil(file.size / self.data["info.piece length"])
 
     @property
     def bitfield(self) -> Bitfield:

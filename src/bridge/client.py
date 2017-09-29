@@ -22,12 +22,14 @@ class Client():
     def generate_response(self, torrent: data.Torrent, remote_peer: peer.Peer) -> peer.PeerMessage:
         # General unchoke/choke stuff
         if remote_peer.am_choking is True and remote_peer.is_choking is False:
+            self._logger.debug("Unchoking peer {}".format(remote_peer))
             remote_peer.am_choking = False
             return peer.UnchokePeerMessage()
 
         # If we're not interested, let them know we are
         # TODO: Make this dependent on torrent state
         if remote_peer.am_interested is False:
+            self._logger.debug("Sending interest to peer {}".format(remote_peer))
             remote_peer.am_interested = True
             return peer.InterestedPeerMessage()
 
@@ -131,10 +133,8 @@ class Client():
         writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
 
         # It's customary to send a bitfield message right afterwards
-        writer.write(peer.BitfieldPeerMessage(torrent.bitfield).encode())
+        writer.write(peer.BitfieldPeerMessage(bytes(torrent.bitfield)).encode())
 
-        self.loop.create_task(self.handle_peer(torrent,
-                                               remote_peer,
-                                               reader,
-                                               writer,
-                                               self._logger.getChild(remote_peer.peer_id)))
+        handler_logger = self._logger.getChild(str(remote_peer.peer_id))
+        handler = self.handle_peer(torrent, remote_peer, reader, writer, handler_logger)
+        self.loop.create_task(handler)

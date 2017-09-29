@@ -14,7 +14,7 @@ logging.basicConfig(filename="run.log", level=logging.DEBUG, format=logging_form
 bridge_logger = logging.getLogger("bridge")
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter("[%(name)s] - %(message)s"))
-ch.setLevel(logging.INFO)
+ch.setLevel(logging.DEBUG)
 bridge_logger.addHandler(ch)
 
 app_logger = logging.getLogger("bridge.app")
