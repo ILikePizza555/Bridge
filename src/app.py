@@ -11,6 +11,12 @@ DEBUG = True
 logging_format = "[%(levelname)s]\t{%(asctime)s}\t%(name)s: %(message)s"
 logging.basicConfig(filename="run.log", level=logging.DEBUG, format=logging_format)
 
+async_logger = logging.getLogger("asyncio")
+ach = logging.StreamHandler()
+ach.setFormatter(logging.Formatter("[%(name)s] - %(message)s"))
+ach.setLevel(logging.ERROR)
+async_logger.addHandler(ach)
+
 bridge_logger = logging.getLogger("bridge")
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter("[%(name)s] - %(message)s"))
