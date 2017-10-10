@@ -1,6 +1,6 @@
 """Classes for managing bit torrent data"""
 from functools import reduce
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 from pizza_utils.listutils import split, chunk
 from pizza_utils.bitfield import Bitfield
 from typing import Optional, Tuple
@@ -15,7 +15,12 @@ import random
 BLOCK_REQUEST_SIZE = 2**15  # Bytes
 
 
-TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size"])
+TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size", "piece_pointer"])
+TorrentFile.__doc__ = """A file indicated by the torrent metadata"""
+TorrentFile.path.__doc__ = """The path (relative to the working directory) or the file."""
+TorrentFile.filename.__doc__ = """The name of the file on disk."""
+TorrentFile.size.__doc__ = """The size of the file in bytes."""
+TorrentFile.piece_pointer.__doc__ = "The index of the first piece that holds data for this file."
 
 
 def calculate_rarity(peer_list: list, piece_count: int):
@@ -49,88 +54,74 @@ class InvalidTorrentError(Exception):
         self.message = message
 
 
-class TorrentData:
+class TorrentMeta:
     """
-    Helper class for dealing with torrent files.
+    Helper class for dealing with torrent metadata.
 
-    Can access raw torrent metadata using the [] operator.
-
-    Atrributes:
-        filename    The file where the data was loaded from.
-        files       A tuple of the files this torrent represents.
-        name        Name of the torrent.
-        info_hash   A sha1 hash of the "info" dict.
-        pieces      A tuple of the sha1 hashes of all the pieces.
-        announce    A list of lists of the announce urls.
     """
-
-    def __init__(self, filename):
+    def __init__(self, filename: str):
+        """
+        Creates a new TorrentMeta object
+        :param filename: path to the torrent file
+        """
         self.filename = filename
-        self.files = tuple()
 
-        with open(self.filename, "rb") as f:
+        with open(filename, mode="rb") as f:
             self._meta = bencoding.decode(f.read())[0]
-            self.info_hash = hashlib.sha1(bencoding.encode(self["info"])).digest()
-            self.name = self["info.name"].decode()
 
-            self._load_files()
-            self._load_pieces()
-            self._load_announce()
+        self._init_announce_urls()
+        self._init_pieces()
+        self._init_pieces()
 
-        self.total_size = sum(i.size for i in self.files)
-
-    def __getitem__(self, key):
-        if not isinstance(key, str):
-            raise TypeError("Key must be string")
-        
-        # We try and preserve the raw byte strings as much as possible
-        # So we convert strings to byte strings to index the dictionaries
-        key_split = [k.encode("utf-8") for k in key.split(".")]
-
-        return reduce(operator.getitem, key_split, self._meta)
-
-    def __contains__(self, key):
-        if not isinstance(key, str):
-            raise TypeError("Key must be string")
-
-        key_split, k = split([k.encode("utf-8") for k in key.split(".")], -1)
-
-        return k[0] in reduce(operator.getitem, key_split, self._meta)
-
-    def __str__(self):
-        return "TorrentData - Filename: {}, Info Hash: {}".format(self.filename, self.info_hash)
-
-    def _load_files(self):
-        if "info.files" in self:
-            rv = []
-
-            for item in self["info.files"]:
-                # Decode the byte strings to strings
-                decoded_path = [s.decode("utf-8") for s in item[b'path']]
-                rv.append(TorrentFile("/".join(decoded_path[:-1]), decoded_path[-1], item[b'length']))
-            
-            self.files = tuple(rv)
-        elif "info.name" in self and "info.length" in self:
-            self.files = (TorrentFile("", self["info.name"].decode("utf-8"), self["info.length"]),)
-        else:
-            raise InvalidTorrentError(self.filename, "File does not contain file data in 'info'")
-    
-    def _load_pieces(self):
-        if "info.pieces" in self:
-            self.pieces = tuple(chunk(self["info.pieces"], 20))
-        else:
-            raise InvalidTorrentError(self.filename, "File does not contain piece data in 'info'")
-
-    def _load_announce(self):
+    def _init_announce_urls(self):
         self.announce = []
 
-        if "announce-list" in self:
-            for announce_list in self["announce-list"]:
-                self.announce.append([url.decode("utf-8") for url in announce_list])
-        elif "announce" in self:
-            self.announce.append([self["announce"].decode()])
+        if b"announce-list" in self._meta:
+            for announce_list in self._meta[b"announce-list"]:
+                self.announce.append([url.decode() for url in announce_list])
+        elif b"announce" in self._meta:
+            self.announce.append([self._meta[b"announce"].decode()])
         else:
-            raise InvalidTorrentError(self.filename, "File does not contain announce.")
+            raise InvalidTorrentError(self.filename, "File does not contain an announce.")
+
+    def _init_pieces(self):
+        info: dict = self._meta[b"info"]
+
+        if b"pieces" in info:
+            self.pieces = tuple(chunk(info[b"pieces"], 20))
+        else:
+            raise InvalidTorrentError(self.filename, "File does not contains pieces.")
+
+    def _init_files(self):
+        pass
+
+    @property
+    def piece_length(self) -> int:
+        """
+        :return: The size of the pieces in bytes
+        """
+        info: dict = self._meta[b"info"] # Do this to appease Pycharm
+        return info[b"piece length"]
+
+    @property
+    def creation_date(self) -> int:
+        """
+        :return: The creation time of the torrent in UNIX epoch format.
+        """
+        return self._meta[b"creation date"]
+
+    @property
+    def comment(self) -> str:
+        return self._meta[b"comment"].decode()
+
+    @property
+    def created_by(self) -> str:
+        return self._meta[b"created by"].decode()
+
+    @property
+    def encoding(self) -> str:
+        return self._meta[b"encoding"].decode()
+
 
 
 class Piece():
@@ -208,7 +199,7 @@ class Torrent:
     """
 
     def __init__(self, filename: str):
-        self.data = TorrentData(filename)
+        self.data = TorrentMeta(filename)
         self.swarm = []
         self.peers = []
 
