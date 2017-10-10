@@ -1,4 +1,4 @@
-from bridge import client, data, peer
+from .bridge import client, data, peer
 from typing import List
 import asyncio
 import glob
@@ -20,7 +20,7 @@ async_logger.addHandler(ach)
 bridge_logger = logging.getLogger("bridge")
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter("[%(name)s] - %(message)s"))
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.INFO)
 bridge_logger.addHandler(ch)
 
 app_logger = logging.getLogger("bridge.app")

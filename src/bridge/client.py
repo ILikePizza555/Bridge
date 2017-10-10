@@ -60,7 +60,7 @@ class Client():
                 remote_peer.is_interested = False
                 logger.debug("Receved not interested message.")
             elif type(message) == peer.HavePeerMessage:
-                logger.info("Has piece {}".format(message.piece_index))
+                logger.debug("Has piece {}".format(message.piece_index))
                 remote_peer.piecefield[message.piece_index] = 1
                 logger.debug("New piecefield {}".format(remote_peer.piecefield))
             elif type(message) == peer.BitfieldPeerMessage:
@@ -102,7 +102,7 @@ class Client():
         # Create a peer object to hold data
         remote_peer = peer.Peer.from_str(handshake.peer_id, ip, port)
         remote_peer.connected = True
-        self._logger.info("Incoming connection with peer [{}] requesting torrent {}".format(remote_peer, handshake.info_hash))
+        self._logger.debug("Incoming connection with peer [{}] requesting torrent {}".format(remote_peer, handshake.info_hash))
 
         # Handshake recieved, lets make sure we're serving the torrent
         torrent = next((t for t in self._torrents if t.data.info_hash == handshake.info_hash), None)
