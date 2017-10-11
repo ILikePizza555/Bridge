@@ -73,6 +73,11 @@ class Piece:
 
         self.state: Piece.State = Piece.State.EMPTY
 
+    def __repr__(self):
+        return "Piece(state={}, piece_hash={}, piece_index={}, piece_size={})".format(
+            self.state, self.piece_hash, self.piece_index, self.piece_size
+        )
+
     @enforce_state("state", State.EMPTY)
     async def load(self, offset: int, data: bytes):
         """Loads data into the buffer"""
@@ -131,8 +136,8 @@ class TorrentMeta:
         self._init_pieces()
         self._init_files()
 
-    def __str__(self):
-        return "TorrentMeta {} infohash: {}".format(self.filename, self.info_hash)
+    def __repr__(self):
+        return "TorrentMeta(filename={} infohash={})".format(self.filename, self.info_hash)
 
     def _init_announce_urls(self):
         self.announce = []
