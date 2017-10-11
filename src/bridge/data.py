@@ -1,15 +1,14 @@
 """Classes for managing bit torrent data"""
-from functools import reduce
 from collections import namedtuple
-from pizza_utils.listutils import split, chunk
+from pizza_utils.listutils import chunk
 from pizza_utils.bitfield import Bitfield
-from typing import Optional, Tuple
+from typing import Tuple
 from . import bencoding, peer, tracker
 import aiohttp.client_exceptions
+import enum
 import hashlib
 import logging
 import math
-import operator
 import random
 
 BLOCK_REQUEST_SIZE = 2**15  # Bytes
@@ -54,11 +53,70 @@ class InvalidTorrentError(Exception):
         self.message = message
 
 
+class Piece():
+    """
+    Class that represents a piece, and provides a buffer for downloading.
+    """
+    class State(enum.Enum):
+        EMPTY = enum.auto(),
+        FULL = enum.auto()
+        VERIFIED = enum.auto(),
+        SAVED = enum.auto()
+
+    def __init__(self, piece_hash: bytes, piece_index: int, piece_size: int):
+        self.piece_hash = piece_hash
+        self.piece_size = piece_size
+        self.piece_index = piece_index
+
+        self.buffer = bytearray()
+
+        self.state: Piece.State = Piece.State.EMPTY
+
+    def load(self, offset: int, data: bytes):
+        """Loads data into the buffer"""
+        if self.state != Piece.State.EMPTY:
+            raise ValueError("Cannot call load(), Piece state is {} (expected EMPTY)".format(self.state))
+
+        self.buffer[offset:offset + len(data)] = data
+        if len(self.buffer) == self.piece_size:
+            self.state = Piece.State.FULL
+
+    def verify(self) -> bool:
+        if self.state != Piece.State.FULL:
+            pass
+
+        if hashlib.sha1(self.buffer).digest() == self.piece_hash:
+            self.verified = True
+            return True
+        else:
+            return False
+
+    async def save(self, file: TorrentFile, offset: int = 0):
+        byte_offset = offset * self.piece_size
+
+        with open(file.path + file.name, mode="w+b") as fh:
+            fh.seek(byte_offset)
+            fh.write(self.buffer)
+
+        # Clean up and free memory
+        del self.buffer
+        self.buffer = bytearray()
+
+        self.saved = True
+
+
 class TorrentMeta:
     """
-    Helper class for dealing with torrent metadata.
+    Class for storing torrent metadata
 
+    Attributes:
+        filename    The filename this object corresponds to
+        info_hash   The sha1 hash of the info dict
+        announce    A list of list of announce urls
+        pieces      A tuple of the sha1 hashes for each piece
+        files       A list of TorrentFile objects
     """
+
     def __init__(self, filename: str):
         """
         Creates a new TorrentMeta object
@@ -69,9 +127,14 @@ class TorrentMeta:
         with open(filename, mode="rb") as f:
             self._meta = bencoding.decode(f.read())[0]
 
+        self.info_hash = hashlib.sha1(bencoding.encode(self._meta["info"])).digest()
+
         self._init_announce_urls()
         self._init_pieces()
-        self._init_pieces()
+        self._init_files()
+
+    def __str__(self):
+        return "TorrentMeta {} infohash: {}".format(self.filename, self.info_hash)
 
     def _init_announce_urls(self):
         self.announce = []
@@ -106,19 +169,18 @@ class TorrentMeta:
 
                 self.files.append(TorrentFile("/".join(path[:-1]), path[-1], size, piece_pointer))
 
-                piece_pointer +=  math.floor(size / self.piece_length)
+                piece_pointer += math.floor(size / self.piece_length)
         elif b"name" in info and b"length" in info:
-            self.files =[TorrentFile("", info[b"name"].decode(), info[b"length"], 0)]
+            self.files = [TorrentFile("", info[b"name"].decode(), info[b"length"], 0)]
         else:
             raise InvalidTorrentError(self.filename, "File does not contain files.")
-
 
     @property
     def piece_length(self) -> int:
         """
         :return: The size of the pieces in bytes
         """
-        info: dict = self._meta[b"info"] # Do this to appease Pycharm
+        info: dict = self._meta[b"info"]  # Do this to appease Pycharm
         return info[b"piece length"]
 
     @property
@@ -139,69 +201,6 @@ class TorrentMeta:
     @property
     def encoding(self) -> str:
         return self._meta[b"encoding"].decode()
-
-
-
-class Piece():
-    """
-    Class that represents a piece, and provides a buffer for downloading.
-
-    Attributes:
-        downloaded      The piece's data has been downloaded, but not saved
-        verified        The piece's data has been downloaded and verified, but not saved
-        saved           The piece has been downloaded, verified, and saved.
-    """
-
-    def __init__(self, piece_hash: bytes, piece_size: Optional[int]):
-        self.piece_hash = piece_hash
-        self.piece_size = piece_size
-
-        self.recycle()
-
-    def __repr__(self):
-        if self.downloaded:
-            return "Piece {hash}: {buffer}".format(self.piece_hash, self.buffer)
-        elif self.verified:
-            return "Piece (v) {hask}: {buffer}".format(self.piece_hash, self.buffer)
-        elif self.downloaded:
-            return "Piece (v,s) {hask}: {buffer}".format(self.piece_hash, self.buffer)
-        else:
-            return "Piece {hash}".format(self.piece_hash)
-
-    def next_offset(self) -> int:
-        return self.piece_size - len(self.data)
-
-    def recycle(self):
-        self.buffer = bytearray()
-        self.downloaded = False
-        self.verified = False
-        self.saved = False
-
-    async def download(self, offset: int, data: bytes):
-        self.buffer[offset:offset + len(data)] = data
-
-        if len(self.buffer) == self.piece_size:
-            self.downloaded = True
-    
-    async def verify(self) -> bool:
-        if hashlib.sha1(self.buffer).digest() == self.piece_hash:
-            self.verified = True
-            return True
-        else:
-            return False
-
-    async def save(self, file: TorrentFile, offset: int = 0):
-        byte_offset = offset * self.piece_size
-
-        with open(file.path + file.name, mode="w+b") as fh:
-            fh.seek(byte_offset)
-            fh.write(self.buffer)
-        
-        # Clean up and free memory
-        del self.buffer
-        self.buffer = bytearray()
-
-        self.saved = True
 
 
 class Torrent:
