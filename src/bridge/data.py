@@ -1,7 +1,8 @@
-"""Classes for managing bit torrent data"""
+"""Classes for managing per-torrent data"""
 from collections import namedtuple
 from pizza_utils.listutils import chunk
 from pizza_utils.bitfield import Bitfield
+from pizza_utils.decs import enforce_state
 from typing import Tuple
 from . import bencoding, peer, tracker
 import aiohttp.client_exceptions
@@ -53,7 +54,7 @@ class InvalidTorrentError(Exception):
         self.message = message
 
 
-class Piece():
+class Piece:
     """
     Class that represents a piece, and provides a buffer for downloading.
     """
@@ -72,29 +73,26 @@ class Piece():
 
         self.state: Piece.State = Piece.State.EMPTY
 
-    def load(self, offset: int, data: bytes):
+    @enforce_state("state", State.EMPTY)
+    async def load(self, offset: int, data: bytes):
         """Loads data into the buffer"""
-        if self.state != Piece.State.EMPTY:
-            raise ValueError("Cannot call load(), Piece state is {} (expected EMPTY)".format(self.state))
-
         self.buffer[offset:offset + len(data)] = data
         if len(self.buffer) == self.piece_size:
             self.state = Piece.State.FULL
 
-    def verify(self) -> bool:
-        if self.state != Piece.State.FULL:
-            pass
-
+    @enforce_state("state", State.FULL)
+    async def verify(self) -> bool:
         if hashlib.sha1(self.buffer).digest() == self.piece_hash:
-            self.verified = True
+            self.state = Piece.State.VERIFIED
             return True
         else:
             return False
 
+    @enforce_state("state", State.VERIFIED)
     async def save(self, file: TorrentFile, offset: int = 0):
         byte_offset = offset * self.piece_size
 
-        with open(file.path + file.name, mode="w+b") as fh:
+        with open(file.path + file.filename, mode="w+b") as fh:
             fh.seek(byte_offset)
             fh.write(self.buffer)
 
@@ -102,7 +100,7 @@ class Piece():
         del self.buffer
         self.buffer = bytearray()
 
-        self.saved = True
+        self.state = Piece.State.SAVED
 
 
 class TorrentMeta:
