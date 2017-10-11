@@ -90,10 +90,28 @@ class TorrentMeta:
         if b"pieces" in info:
             self.pieces = tuple(chunk(info[b"pieces"], 20))
         else:
-            raise InvalidTorrentError(self.filename, "File does not contains pieces.")
+            raise InvalidTorrentError(self.filename, "File does not contain pieces.")
 
     def _init_files(self):
-        pass
+        self.files = []
+        info: dict = self._meta[b"info"]
+
+        if b"files" in info:
+            # Multi-file mode
+            piece_pointer = 0
+
+            for item in info[b"files"]:
+                path = [s.decode() for s in item["path"]]
+                size = item[b"length"]
+
+                self.files.append(TorrentFile("/".join(path[:-1]), path[-1], size, piece_pointer))
+
+                piece_pointer +=  math.floor(size / self.piece_length)
+        elif b"name" in info and b"length" in info:
+            self.files =[TorrentFile("", info[b"name"].decode(), info[b"length"], 0)]
+        else:
+            raise InvalidTorrentError(self.filename, "File does not contain files.")
+
 
     @property
     def piece_length(self) -> int:
