@@ -1,5 +1,13 @@
 Bridge is a BitTorrent client writen in python that focuses on speed and simplicity.
 
+# Roadmap
+
+- REST API
+- Fast Peer Extention (BEP-6)
+- DHT Extention (BEP-5)
+- uTP (BEP-29)
+- Protocol v2 (BEP-32)
+
 # Install
 
 Coming Soon.
