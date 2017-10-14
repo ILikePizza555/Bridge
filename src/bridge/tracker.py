@@ -142,3 +142,36 @@ async def announce_tracker(torrent: 'data.Torrent',
             else:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await resp.text()))
+
+"""
+    async def announce(self, port: int, peer_id: bytes):
+        self._logger.info("Beginning anounce...")
+
+        # TODO: Add support for backups
+        # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces
+        # fail in the first list. Then, the sub-lists are rearragned so that the first successful trackers are first in
+        # their sub-lists. http://bittorrent.org/beps/bep_0012.html
+        for announce_url in self.data.announce[0]:
+            self._logger.info("Announcing on " + announce_url)
+
+            peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
+            self._logger.info("Requesting {} peers".format(peer_count_request))
+
+            try:
+                response = await tracker.announce_tracker(self, peer_id, announce_url, port, numwant=peer_count_request)
+
+                if not response.sucessful:
+                    self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
+                    continue
+
+                self._logger.info("Announce successful.")
+
+                if peer_count_request > 0:
+                    # Dump all the peers into the swarm
+                    new_peers = [p for p in response.peers if p not in self.swarm]
+                    self.swarm.extend(new_peers)
+                    self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
+            except aiohttp.client_exceptions.ClientConnectionError:
+                self._logger.error("Failed to connect to tracker {}".format(announce_url))
+                continue
+"""

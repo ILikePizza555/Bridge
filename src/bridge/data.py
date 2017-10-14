@@ -3,9 +3,8 @@ from collections import namedtuple
 from pizza_utils.listutils import chunk
 from pizza_utils.bitfield import Bitfield
 from pizza_utils.decs import enforce_state
-from typing import Tuple
-from . import bencoding, peer, tracker
-import aiohttp.client_exceptions
+from . import bencoding, peer
+from typing import Union, List, Optional
 import enum
 import hashlib
 import logging
@@ -14,31 +13,39 @@ import random
 
 BLOCK_REQUEST_SIZE = 2**15  # Bytes
 
+class TorrentFile:
+    """
+    A file indicated by the torrent metadata
+    """
+    __slots__ = ("path", "filename", "size", "piece_pointer")
 
-TorrentFile = namedtuple("TorrentFile", ["path", "filename", "size", "piece_pointer"])
-TorrentFile.__doc__ = """A file indicated by the torrent metadata"""
-TorrentFile.path.__doc__ = """The path (relative to the working directory) or the file."""
-TorrentFile.filename.__doc__ = """The name of the file on disk."""
-TorrentFile.size.__doc__ = """The size of the file in bytes."""
-TorrentFile.piece_pointer.__doc__ = "The index of the first piece that holds data for this file."
+    def __init__(self, path, filename, size, piece_pointer):
+        """
+        :param path: The path (relative to the working directory) or the file.
+        :param filename: The name of the file on disk.
+        :param size: The size of the file in bytes.
+        :param piece_pointer: The index of the first piece that holds data for this file.
+        """
+        self.path = path
+        self.filename = filename
+        self.size = size
+        self.piece_pointer = piece_pointer
+
+    def piece_in_range(self, piece_index: int, piece_length: int) -> bool:
+        end = self.piece_pointer + math.ceil(self.size / piece_length)
+
+        return piece_index >= self.piece_pointer and piece_length <= end
 
 
-def calculate_rarity(peer_list: list, piece_count: int):
+def calculate_rarity(peer_list: list, piece_index: int) -> int:
     """Maps rarity to a list of piece indexes"""
-    pieces = {}
 
-    for i in range(0, piece_count):
-        rarity = 0
-        for p in peer_list:
-            if p.piecefield[i] > 0:
-                rarity = rarity + 1
+    rarity = 0
+    for p in peer_list:
+        if p.piecefield[piece_index] > 0:
+            rarity = rarity + 1
 
-        if rarity in pieces:
-            pieces[rarity].append(i)
-        else:
-            pieces[rarity] = [i]
-
-    return pieces
+    return rarity
 
 
 class InvalidTorrentError(Exception):
@@ -211,42 +218,38 @@ class Torrent:
     Class for storing Torrent state.
 
     Attributes:
-        data            The TorrentData of the Torrent
-        swarm           A list of all the peers.
-        peers           A list of the peers the client is connected too
-        pieces          A list of the pieces
-        file_indexes    A map of piece indexes and files
+        meta                The metadata of the torrent
+        swarm               All the peers available
+        swarm_holds         A list of different indexes of `swarm` that are being held
+        total_uploaded      The total amount of bytes uploaded
+        total_downloaded    The total amount of bytes downloaded
+        pieces              A list of all pieces that correspond to the torrent
+        piece_holds         A list of different indexes of `pieces` that are being "held"
+        key                 A unique string of bytes announced to the tracker
     """
 
     def __init__(self, filename: str):
-        self.data = TorrentMeta(filename)
+        self.meta = TorrentMeta(filename)
         self.swarm = []
-        self.peers = []
+        self.swarm_holds = []
 
         self.total_uploaded = 0
         self.total_downloaded = 0
 
-        self.pieces = tuple(Piece(ph, self.data["info.piece length"]) for ph in self.data.pieces)
-        self.downloading = []
-        # File indexes are basically pointers to items in the pieces list
-        # They're indicators of which pieces correspond to which files
-        self.file_indexes = self._calculate_file_indexes()
+        l = self.meta.piece_length
+        self.pieces = tuple(Piece(h, i, l) for h, i in self.meta.pieces)
+        self.piece_holds = []
 
         # Unique key to identify the torrent
         self.key = bytes(random.sample(range(0, 256), 8))
 
-        self._logger = logging.getLogger("bridge.torrent." + self.data.name)
-        self._announce_time = []
-        self._celebrate = False
-
-    def __str__(self):
-        return "Torrent(name: {}, swarm: {}, peers: {})".format(self.data.name, len(self.swarm), len(self.peers))
+        self._logger = logging.getLogger("bridge.torrent." + self.meta.filename)
 
     @property
     def downloaded(self) -> int:
         rv = 0
         for p in self.pieces:
-            if p.saved:
+            if p.state == Piece.State.SAVED:
                 rv = rv + p.piece_size
         return rv
 
@@ -254,117 +257,89 @@ class Torrent:
     def left(self) -> int:
         rv = 0
         for p in self.pieces:
-            if not p.verified:
+            if p.state != Piece.State.VERIFIED:
                 rv = rv + p.piece_size
         return rv
-    
-    def _calculate_file_indexes(self):
-        rv = {}
-        next_index = 0
-
-        for file in self.data.files:
-            rv[next_index] = file
-            next_index = next_index + math.ceil(file.size / self.data["info.piece length"])
 
     @property
     def bitfield(self) -> Bitfield:
         rv = Bitfield()
         for p in self.pieces:
-            if p.saved:
+            if p.state == Piece.State.SAVED:
                 rv[0] = 1
             else:
                 rv = rv << 1
         
         return rv
 
-    def get_piece_file(self, i: int) -> Tuple[int, TorrentFile]:
-        for index, file in reversed(self.file_indexes):
-            if i > index:
-                return (index, file)
+    @property
+    def rare_pieces(self) -> List[Piece]:
+        """
+        :return: A list of pieces, sorted by rarest first.
+        """
 
-    def ask_for_block(self, remote_peer) -> peer.PeerMessage:
-        for i in self.downloading:
-            if remote_peer.piecefield[i] > 0:
-                offset = len(self.pieces[i].buffer)
-                self._logger.debug("Asking for piece {} at offset {} from {}".format(i, offset, remote_peer))
-                return peer.RequestPeerMessage(i, offset, BLOCK_REQUEST_SIZE)
+        return sorted(self.pieces, key=lambda i: calculate_rarity(self.swarm, i.piece_index))
 
-        rp = calculate_rarity(self.swarm, len(self.pieces))
-        rarity = sorted(rp.keys(), reverse=True)
+    def insert_peer(self, p: peer.Peer):
+        """
+        Inserts a peer into the swarm
+        :param p:
+        :return:
+        """
 
-        for r in rarity:
-            for i in rp[r]:
-                if remote_peer.piecefield[i] > 0 and i not in self.downloading and not self.pieces[i].verified:
-                    self._logger.debug("Asking for piece {} from {}".format(i, remote_peer))
-                    return peer.RequestPeerMessage(i, 0, BLOCK_REQUEST_SIZE)
+        if p not in self.swarm:
+            self.swarm.append(p)
 
-    async def recieve_block(self, piece_index: int, offset: int, data: bytes):
-        """Handler for recieving a block of data"""
-        p: Piece = self.pieces[piece_index]
-        self.downloading.append(piece_index)
-        self.total_downloaded = self.total_downloaded + len(data)
+    def insert_peers(self, peers: List[peer.Peer]):
+        for p in peers:
+            self.insert_peer(p)
 
-        await p.download(offset, data)
+    def claim_peer(self, i: int) -> Optional[peer.Peer]:
+        """
+        Takes the specified peer from the swarm, places a hold, and returns it.
+        :param i:
+        :return:
+        """
 
-        if p.downloaded:
-            self._logger.debug("Downloaded {}".format(p))
+        if i not in self.swarm_holds:
+            rv = self.swarm[i]
+            rv.index = i
+            return rv
 
-            if await p.verify():
-                # The piece has been fully downloaded and verified, save to disk
-                self._logger.debug("Verified {}".format(p))
+        return None
 
-                f_index, f = self.get_piece_file(piece_index)
-                piece_offset = piece_index - f_index
+    def return_peer(self, p: peer.Peer):
+        """
+        Removes any holds from the peer. Raises a KeyError if there are no holds.
+        :param p:
+        :return:
+        """
+        self.swarm_holds.remove(p.index)
 
-                self._logger.debug("Saving {} to {} offset {}".format(p, f, piece_offset))
+    def claim_piece(self, i: int) -> Optional[Piece]:
+        if i not in self.piece_holds:
+            self.piece_holds.append(i)
+            return self.pieces[i]
 
-                try:
-                    p.save(f, piece_offset)
-                    self._logger.info("Successfully downloaded piece {}.".format_map(piece_index))
+        return None
 
-                    # Because why not
-                    if self._celebrate is False:
-                        print("Congrats! You just downloaded your first piece! :)")
-                        print("Here it is:")
-                        print(p.buffer)
+    def return_piece(self, p: Piece):
+        self.piece_holds.remove(p.piece_index)
 
-                        self._celebrate = True
-                except OSError:
-                    self._logger.warn("Error downloading piece {}. Discarding.")
-                    p.recycle()
-                finally:
-                    self.downloading.remove(piece_index)
-            else:
-                self._logger.debug("Piece {} failed to verify. Recycling.".format(p))
-                p.recycle()
+    def find_file(self, piece: Union[int, Piece]) -> TorrentFile:
+        """
+        Finds the torrent file that the given piece corresponds to.
 
-    async def announce(self, port: int, peer_id: bytes):
-        self._logger.info("Beginning anounce...")
+        :param piece: Either an int representing a piece index, or a Piece object.
+        :return:
+        """
+        if type(piece) == int:
+            if piece < 0 or piece >= len(self.pieces):
+                raise IndexError("parameter piece ({}) is out of bounds [0, {})".format(piece, len(self.pieces)))
+            index = piece
+        elif isinstance(piece, Piece):
+            index = piece.piece_index
 
-        # TODO: Add support for backups
-        # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces
-        # fail in the first list. Then, the sub-lists are rearragned so that the first successful trackers are first in
-        # their sub-lists. http://bittorrent.org/beps/bep_0012.html
-        for announce_url in self.data.announce[0]:
-            self._logger.info("Announcing on " + announce_url)
-
-            peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
-            self._logger.info("Requesting {} peers".format(peer_count_request))
-
-            try:
-                response = await tracker.announce_tracker(self, peer_id, announce_url, port, numwant=peer_count_request)
-
-                if not response.sucessful:
-                    self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
-                    continue
-
-                self._logger.info("Announce successful.")
-
-                if peer_count_request > 0:
-                    # Dump all the peers into the swarm
-                    new_peers = [p for p in response.peers if p not in self.swarm]
-                    self.swarm.extend(new_peers)
-                    self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
-            except aiohttp.client_exceptions.ClientConnectionError:
-                self._logger.error("Failed to connect to tracker {}".format(announce_url))
-                continue
+        for f in self.meta.files:
+            if f.piece_in_range(index, self.meta.piece_length):
+                return f
