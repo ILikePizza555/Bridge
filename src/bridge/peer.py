@@ -1,4 +1,6 @@
+from asyncio import StreamReader, IncompleteReadError
 from pizza_utils.bitfield import Bitfield
+from typing import AsyncGenerator, Optional
 import logging
 import struct
 import socket
@@ -14,7 +16,7 @@ NEW_CONNECTION_LIMIT = 30
 PEER_ID_PREFIX = "-BI0001-"
 
 
-class PeerMessage():
+class PeerMessage:
     """
     Base Peer Message class. Simply contains a message id and a length. It's really simple.
     """
@@ -182,42 +184,66 @@ class PortPeerMessage(PeerMessage, message_id=9, length=3):
         return super().encode() + struct.pack(">H", self.port)
 
 
-class PeerMessageIterator():
-    def __init__(self, reader):
+class PeerMessageIterator:
+    def __init__(self, reader: StreamReader, buffer_size: int = 10000):
         self._reader = reader
+        self.buffer_size = buffer_size
+        self.buffer = bytearray()
 
-    def __aiter__(self):
-        return self
+    def cut(self, amount):
+        rv = self.buffer[:amount]
+        del self.buffer[:amount]
+        return rv
 
-    async def __anext__(self):
+    async def buffer(self) -> AsyncGenerator:
+        """
+        Attempts to fill the buffer, and returns a generator.
+        :return:
+        """
         try:
-            length_prefix = await self._reader.read(4)
+            read_amount = self.buffer_size - len(self.buffer)
 
-            # Check if more data is present
-            if length_prefix == b"":
-                raise StopAsyncIteration()
+            if read_amount > 0:
+                self.buffer.append(await self._reader.readexactly(read_amount))
 
-            # Length is a 4-byte big endian integer, and the first of the message
-            length, = struct.unpack(">I", length_prefix)
+        except IncompleteReadError as e:
+            logger.warning("Only read {} bytes into buffer (wanted {}).".format(len(e.partial), read_amount))
+            self.buffer.append(e.partial)
 
-            # If the length is 0, no need to read data, it's a keep alive
-            if length == 0:
-                return KeepAlivePeerMessage()
+        return self.gen()
+
+    async def gen(self):
+        while len(self.buffer) > 0:
+            try:
+                # Length is a 4-byte big endian integer, and the first of the message
+                # We don't cut the buffer just in case the full packet isn't loaded
+                length, = struct.unpack(">I", self.buffer[:4])
+
+                # If the length is 0, no need to read data, it's a keep alive
+                if length == 0:
+                    yield KeepAlivePeerMessage()
+            except KeyError:
+                logger.warning("Ran out of buffer.")
+                break
+
+            if len(self.buffer) < length + 4:
+                # The buffer doesn't contain the full packet. Stop iteration.
+                break
+            else:
+                # Cut the length (which is already parsed) off
+                del self.buffer[:4]
 
             # Read out only the length of the message, parse the message id, then decode the message
-            data = await self._reader.read(length)
+            data = self.cut(length)
             message_id = data[0]
 
-            return PeerMessage.id_map[message_id].decode(data[1:])
-        except KeyError:
-            logger.error("No message found with id {}".format(message_id))
-        except ConnectionResetError:
-            raise StopAsyncIteration()
-
-        raise StopAsyncIteration()
+            try:
+                yield PeerMessage.id_map[message_id].decode(data[1:])
+            except KeyError:
+                logger.error("No message found with id {}".format(message_id))
 
 
-class HandshakeMessage():
+class HandshakeMessage:
     """
     Not part of the peer wire protocol, but it's the first message transmitted by the client which
     initatied the connection.
