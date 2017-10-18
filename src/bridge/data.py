@@ -137,7 +137,7 @@ class TorrentMeta:
         with open(filename, mode="rb") as f:
             self._meta = bencoding.decode(f.read())[0]
 
-        self.info_hash = hashlib.sha1(bencoding.encode(self._meta["info"])).digest()
+        self.info_hash = hashlib.sha1(bencoding.encode(self._meta[b"info"])).digest()
 
         self._init_announce_urls()
         self._init_pieces()
@@ -174,7 +174,7 @@ class TorrentMeta:
             piece_pointer = 0
 
             for item in info[b"files"]:
-                path = [s.decode() for s in item["path"]]
+                path = [s.decode() for s in item[b"path"]]
                 size = item[b"length"]
 
                 self.files.append(TorrentFile("/".join(path[:-1]), path[-1], size, piece_pointer))
@@ -237,13 +237,18 @@ class Torrent:
         self.total_downloaded = 0
 
         l = self.meta.piece_length
-        self.pieces = tuple(Piece(h, i, l) for h, i in self.meta.pieces)
+        self.pieces = tuple(Piece(h, i, l) for h, i in enumerate(self.meta.pieces))
         self.piece_holds = []
 
         # Unique key to identify the torrent
         self.key = bytes(random.sample(range(0, 256), 8))
 
         self._logger = logging.getLogger("bridge.torrent." + self.meta.filename)
+
+    def __repr__(self):
+        return "Torrent ({}) {} peers, {} bytes uploaded, {} bytes downloaded".format(
+            self.meta.info_hash, len(self.swarm), self.total_uploaded, self.total_downloaded
+        )
 
     @property
     def downloaded(self) -> int:

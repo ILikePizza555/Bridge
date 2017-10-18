@@ -1,4 +1,4 @@
-from .bridge import client, data, peer
+from bridge import client, data, peer
 from typing import List
 import asyncio
 import aiohttp
@@ -29,6 +29,7 @@ peer_id = peer.generate_peer_id(debug=DEBUG).encode()
 listen_port = random.randrange(6881, 6889)
 
 http_session = aiohttp.ClientSession()
+
 
 async def load_files() -> List[data.Torrent]:
     torrent_list = glob.glob("./*.torrent")

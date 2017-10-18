@@ -34,7 +34,7 @@ def extract_int(s: bytearray) -> Tuple[int, bytearray]:
     return int(current_num.decode()), s[i:]
 
 
-def decode(s: Optional[bytearray, bytes]) -> Tuple[Union[bytearray, int, list, OrderedDict, None], Optional[bytearray]]:
+def decode(s: Union[bytearray, bytes]) -> Tuple[Union[bytearray, int, list, OrderedDict, None], Optional[bytearray]]:
     """
     Decodes a bencoded bytestring.
     """
