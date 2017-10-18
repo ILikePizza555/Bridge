@@ -44,7 +44,7 @@ class PeerClient:
         """
         Handles incoming peer messages and responds.
         """
-        async for message in self.message_iter.buffer():
+        async for message in await self.message_iter.load_generator():
             if type(message) == peer.KeepAlivePeerMessage:
                 self.writer.write(peer.KeepAlivePeerMessage().encode())
 

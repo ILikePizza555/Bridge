@@ -185,7 +185,7 @@ class PortPeerMessage(PeerMessage, message_id=9, length=3):
 
 
 class PeerMessageIterator:
-    def __init__(self, reader: StreamReader, buffer_size: int = 10000):
+    def __init__(self, reader: StreamReader, buffer_size: int = 1000):
         self._reader = reader
         self.buffer_size = buffer_size
         self.buffer = bytearray()
@@ -195,7 +195,7 @@ class PeerMessageIterator:
         del self.buffer[:amount]
         return rv
 
-    async def buffer(self) -> AsyncGenerator:
+    async def load_generator(self) -> AsyncGenerator:
         """
         Attempts to fill the buffer, and returns a generator.
         :return:
@@ -204,11 +204,15 @@ class PeerMessageIterator:
             read_amount = self.buffer_size - len(self.buffer)
 
             if read_amount > 0:
-                self.buffer.append(await self._reader.readexactly(read_amount))
+                data = await self._reader.read(read_amount)
+                self.buffer.extend(data)
 
         except IncompleteReadError as e:
             logger.warning("Only read {} bytes into buffer (wanted {}).".format(len(e.partial), read_amount))
             self.buffer.append(e.partial)
+        except ConnectionAbortedError as e:
+            logger.error("Error reading socket! {}".format(e.strerror))
+
 
         return self.gen()
 
