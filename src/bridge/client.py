@@ -1,14 +1,98 @@
-from . import data, peer
+from . import data, peer, tracker
 from pizza_utils.bitfield import Bitfield
-from typing import List
 import asyncio
+import aiohttp
 import logging
 import math
 
 
-class Client():
+def message_handler(message_type):
     """
-    Manages peers, the connections to those peers, and the messages from those peers
+    Decorator used to bind message handler functions to PeerClient
+    :param message_type:
+    :return:
+    """
+    def decorator(func):
+        PeerClient.message_handlers[message_type] = func
+    return decorator
+
+
+class PeerClient:
+    """
+    Represents a connection to a peer. Handles incoming messages and sends out messages.
+    """
+    message_handlers = {}
+
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                 p: peer.Peer, torrent: data.Torrent):
+        self.peer = p
+        self.torrent = torrent
+        self.writer = writer
+
+        self.message_iter = peer.PeerMessageIterator(reader)
+        self._logger = logging.getLogger("bridge.PeerClient.{}".format(p.peer_id))
+
+    def __repr__(self):
+        return "PeerClient to: {}:{}; for {}".format(self.peer.ip,
+                                                     self.peer.port,
+                                                     self.torrent.meta.info_hash)
+
+    @message_handler(peer.ChokePeerMessage)
+    async def _handle_choke(self, m: peer.ChokePeerMessage):
+        self._logger.debug("Got choke message.")
+        self.peer.is_choking = True
+
+    @message_handler(peer.UnchokePeerMessage)
+    async def _handle_unchoke(self, m: peer.UnchokePeerMessage):
+        self._logger.debug("Got unchoke message.")
+        self.peer.is_choking = False
+
+    @message_handler(peer.InterestedPeerMessage)
+    async def _handle_interested(self, m: peer.InterestedPeerMessage):
+        self._logger.debug("Got interested message.")
+        self.peer.is_interested = True
+
+    @message_handler(peer.NotInterestedPeerMessage)
+    async def _handle_not_interested(self, m: peer.NotInterestedPeerMessage):
+        self._logger.debug("Got not interested message.")
+        self.peer.is_interested = False
+
+    @message_handler(peer.HavePeerMessage)
+    async def _handle_have(self, m: peer.HavePeerMessage):
+        self._logger.debug("Got have message, piece {}.".format(m.piece_index))
+        self.peer.piecefield[m.piece_index] = 1
+
+    @message_handler(peer.BitfieldPeerMessage)
+    async def _handle_bitfield(self, m: peer.BitfieldPeerMessage):
+        b = Bitfield(int.from_bytes(m.bitfield, byteorder="big"))
+        self.peer.piecefield = b
+        self._logger.debug("Got bitfield message: {}".format(b))
+
+    @message_handler(peer.RequestPeerMessage)
+    async def _handle_request(self, m: peer.RequestPeerMessage):
+        pass
+
+    @message_handler(peer.BlockPeerMessage)
+    async def _handle_block(self, m: peer.BlockPeerMessage):
+        pass
+
+    @message_handler(peer.PortPeerMessage)
+    async def _handle_port(self, m: peer.PortPeerMessage):
+        pass
+
+    async def handle(self):
+        """
+        Handles incoming peer messages and responds.
+        """
+        async for message in self.message_iter.buffer():
+            if type(message) == peer.KeepAlivePeerMessage:
+                self.writer.write(peer.KeepAlivePeerMessage().encode())
+
+            PeerClient.message_handlers[type(message)](self, message)
+
+class Client:
+    """
+    Manages torrents and establishes connections to peers
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop, peer_id: bytes, listen_port: int):
@@ -19,69 +103,23 @@ class Client():
         self._torrents: list[data.Torrent] = []
         self._logger = logging.getLogger("bridge.client")
 
-        loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
+        self._torrent_announce_tasks = []
+        self._peer_clients = []
+        self._peer_client_tasks = []
 
-    def generate_response(self, torrent: data.Torrent, remote_peer: peer.Peer) -> peer.PeerMessage:
-        # If we're not interested, let them know we are
-        # TODO: Make this dependent on torrent state
-        if remote_peer.am_interested is False:
-            self._logger.debug("Sending interest to peer {}".format(remote_peer))
-            remote_peer.am_interested = True
-            return peer.InterestedPeerMessage()
+        self._server_task = loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
 
-        # If we're being choked we can't ask for pieces
-        if remote_peer.is_choking is False:
-            return torrent.ask_for_block(remote_peer)
+    def add_torrent(self, torrent: data.Torrent, client_session: aiohttp.ClientSession):
+        async def torrent_announce_loop():
+            tr = tracker.TrackerRequest(client_session, torrent, self.peer_id, self.listen_port)
 
-    async def add_torrent(self, torrent: data.Torrent):
+            while True:
+                resp = await tr.announce(numwant=torrent.needed_peer_amount)
+                torrent.insert_peers(resp.peers)
+                await asyncio.sleep(resp.interval)
+
+        self._torrent_announce_tasks.append(self.loop.create_task(torrent_announce_loop()))
         self._torrents.append(torrent)
-        await torrent.announce(self.listen_port, self.peer_id)
-
-    async def handle_peer(self, torrent: data.Torrent, remote_peer: peer.Peer,
-                          reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                          logger: logging.Logger):
-        """
-        Handles a peer client after proper initation procedures have been completed.
-        """
-        async for message in peer.PeerMessageIterator(reader):
-            if type(message) == peer.KeepAlivePeerMessage:
-                logger.debug("Writing keepalive back.")
-                writer.write(peer.KeepAlivePeerMessage().encode())
-            elif type(message) == peer.ChokePeerMessage:
-                logger.debug("Recieved choke message.")
-                remote_peer.is_choking = True
-            elif type(message) == peer.UnchokePeerMessage:
-                logger.debug("Recieved unchoke message.")
-                remote_peer.is_choking = False
-            elif type(message) == peer.InterestedPeerMessage:
-                logger.debug("Recieved interested message.")
-                remote_peer.is_interested = True
-            elif type(message) == peer.NotInterestedPeerMessage:
-                remote_peer.is_interested = False
-                logger.debug("Receved not interested message.")
-            elif type(message) == peer.HavePeerMessage:
-                logger.debug("Has piece {}".format(message.piece_index))
-                remote_peer.piecefield[message.piece_index] = 1
-                logger.debug("New piecefield {}".format(remote_peer.piecefield))
-            elif type(message) == peer.BitfieldPeerMessage:
-                b = Bitfield(int.from_bytes(message.bitfield, byteorder="big"))
-                logger.debug("Recieved bitfield (size {}) {}".format(len(b), b))
-                remote_peer.piecefield = b
-            elif type(message) == peer.RequestPeerMessage:
-                pass
-            elif type(message) == peer.BlockPeerMessage:
-                logging.debug("Recieved block {} offset {}".format(message.index, message.begin))
-                await torrent.recieve_block(message.index, message.begin, message.block)
-
-                # Logging
-                p = torrent.downloaded / torrent.data.total_size * 100
-                print("{}\n{}% done {} total bytes downloaded, {} bytes left"
-                      .format(torrent, p, torrent.total_downloaded, torrent.left))
-
-            # Send our response
-            response = self.generate_response(torrent, remote_peer)
-            if response is not None:
-                writer.write(response.encode())
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """
@@ -105,7 +143,7 @@ class Client():
         self._logger.debug("Incoming connection with peer [{}] requesting torrent {}".format(remote_peer, handshake.info_hash))
 
         # Handshake recieved, lets make sure we're serving the torrent
-        torrent = next((t for t in self._torrents if t.data.info_hash == handshake.info_hash), None)
+        torrent = next((t for t in self._torrents if t.meta.info_hash == handshake.info_hash), None)
         if torrent is None:
             # Sorry we don't have that in stock right now
             # Please come again
@@ -115,7 +153,7 @@ class Client():
             return
 
         # Make sure we don't have too many connections
-        if len(torrent.peers) >= peer.MAX_PEERS:
+        if len(torrent.swarm) >= peer.MAX_PEERS:
             # Torrent machine broke
             self._logger.debug(
                 "Dropped connection with peer [{}]. (Reached MAX_PEERS)".format(remote_peer)
@@ -124,22 +162,21 @@ class Client():
             writer.close()
             return
 
-        # Remove any duplicate peers
-        torrent.swarm = [p for p in torrent.swarm if p != remote_peer]
         # Add the new peer to the list
-        torrent.peers.append(remote_peer)
+        torrent.insert_peer(remote_peer)
+        torrent.claim_peer(len(torrent.swarm) - 1)
 
         # Send our handshake
-        writer.write(peer.HandshakeMessage(torrent.data.info_hash, self.peer_id).encode())
+        writer.write(peer.HandshakeMessage(torrent.meta.info_hash, self.peer_id).encode())
 
         # It's customary to send a bitfield message right afterwards
         a = (len(torrent.pieces) - len(torrent.bitfield) - 1)
-        padding = bytes([0] * math.floor(a / 8))
+        padding = bytes([0] * int(math.floor(a / 8)))
         payload = bytes(torrent.bitfield) + padding
         self._logger.debug("Sending {} + {} NULL (size: {})".format(torrent.bitfield, len(padding), len(payload)))
         writer.write(peer.BitfieldPeerMessage(payload).encode())
 
-        # Pass the rest of the process to the handler
-        handler_logger = self._logger.getChild(str(remote_peer.peer_id))
-        handler = self.handle_peer(torrent, remote_peer, reader, writer, handler_logger)
-        self.loop.create_task(handler)
+        # Create a PeerClient to handle the rest of the connection
+        pc = PeerClient(reader, writer, remote_peer, torrent)
+        self._peer_clients.append(pc)
+        self._peer_client_tasks.append(self.loop.create_task(pc.handle()))

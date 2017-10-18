@@ -142,9 +142,9 @@ class TrackerRequest:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await response.text()))
 
-    async def announce(self, params: Optional[dict] = None) -> TrackerResponse:
-        if params is None:
-            params = self.build_get_params()
+    async def announce(self, **kwargs) -> TrackerResponse:
+        if kwargs is not None:
+            params = self.build_get_params(**kwargs)
 
         # TODO: Add support for backups
         # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces

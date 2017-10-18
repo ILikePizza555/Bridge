@@ -1,6 +1,7 @@
 from .bridge import client, data, peer
 from typing import List
 import asyncio
+import aiohttp
 import glob
 import logging
 import random
@@ -27,6 +28,7 @@ app_logger = logging.getLogger("bridge.app")
 peer_id = peer.generate_peer_id(debug=DEBUG).encode()
 listen_port = random.randrange(6881, 6889)
 
+http_session = aiohttp.ClientSession()
 
 async def load_files() -> List[data.Torrent]:
     torrent_list = glob.glob("./*.torrent")
@@ -41,7 +43,7 @@ async def start_app(loop: asyncio.AbstractEventLoop):
 
         for t in await load_files():
             app_logger.info("Adding torrent {}".format(t))
-            await peer_client.add_torrent(t)
+            peer_client.add_torrent(t, http_session)
 
     except Exception:
         traceback.print_exc()
