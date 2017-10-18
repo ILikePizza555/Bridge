@@ -273,6 +273,10 @@ class Torrent:
         return rv
 
     @property
+    def needed_peer_amount(self) -> int:
+        return max(peer.NEW_CONNECTION_LIMIT - len(self.swarm), 0)
+
+    @property
     def rare_pieces(self) -> List[Piece]:
         """
         :return: A list of pieces, sorted by rarest first.

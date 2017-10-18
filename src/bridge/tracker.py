@@ -1,13 +1,14 @@
 """Contains functions and coroutines for the bit torrent protocol"""
-from . import bencoding, peer
+from . import bencoding, peer, data
 from typing import Optional
 from urllib.parse import urlencode
 from pizza_utils.listutils import chunk
 import aiohttp
 import enum
+import logging
 
 
-class TrackerResponse():
+class TrackerResponse:
     def __init__(self, response: dict):
         self.response = response
     
@@ -16,14 +17,14 @@ class TrackerResponse():
         return b"failure reason" not in self.response
 
     @property
-    def failure_reason(self) -> str:
+    def failure_reason(self) -> Optional[str]:
         """Returns a failure reason if one exists. Otherwise returns None."""
         if b"failure reason" in self.response:
             return self.response[b"failure reason"].decode("utf-8")
         return None
 
     @property
-    def warning_message(self) -> str:
+    def warning_message(self) -> Optional[str]:
         """Returns a warning message if one exists. Otherwise returns None."""
         if b"warning message" in self.response:
             return self.response[b"warning message"].decode("utf-8")
@@ -34,7 +35,7 @@ class TrackerResponse():
         return self.response[b"interval"]
 
     @property
-    def min_interval(self) -> int:
+    def min_interval(self) -> Optional[int]:
         if b"min interval" in self.response:
             return self.response[b"min interval"]
         return None
@@ -82,96 +83,78 @@ class TrackerEvent(enum.Enum):
     completed = enum.auto()
 
 
-async def announce_tracker(torrent: 'data.Torrent',
-                           peer_id: bytes,
-                           announce_url: str,
-                           port: int,
-                           compact: int = 1,
-                           no_peer_id: int = 0,
-                           trackerid: Optional[str] = None,
-                           event: Optional[TrackerEvent] = None,
-                           ip: Optional[str] = None,
-                           numwant: Optional[int] = peer.NEW_CONNECTION_LIMIT) -> TrackerResponse:
-    """
-    Announces to the tracker.
+class TrackerRequest:
+    def __init__(self, http_client: aiohttp.ClientSession, torrent: data.Torrent,
+                 peer_id: bytes, port: int, ip: Optional[str] = None):
+        self.http_client = http_client
+        self.torrent = torrent
+        self.peer_id = peer_id
+        self.port = port
+        self.ip = ip
 
-    Params:
-        - torrent: The torrent object that corresponds to the announce
-        - announce_url: the url to announce to
-        - compact: Optional. Indicates that the client accepts a compact response. Defaults to 1.
-        - no_peer_id: Optional. Indicates that the tracker can omit peer_ids. Defaults to 0.
-        - key: Optional. An additional id that's not shared with other peers.
-        - trackerid: Optional. A previously recieved string that should be sent on next announcements
-        - event: Optional.
-        - ip: Optional. The true ip of the client
-        - numwant: Optional. The number of peers the client wants to recieve. Defaults to NEW_CONNECTION_LIMIT.
-    """
-    get_params = {
-        "info_hash": torrent.data.info_hash,
-        "peer_id": peer_id,
-        "port": port,
-        "uploaded": str(torrent.total_uploaded),
-        "downloaded": str(torrent.total_downloaded),
-        "left": str(torrent.left),
-        "key": torrent.key,
-        "compact": compact,
-        "no_peer_id": no_peer_id
-    }
+        self.tracker_id = None
+        self._logger = logging.getLogger("bridge.tracker")
 
-    if event is not None:
-        get_params["event"] = event.name
+    def build_get_params(self, compact: int = 1, no_peer_id: int = 0,
+                         event: Optional[TrackerEvent] = None,
+                         numwant: Optional[int]  = peer.NEW_CONNECTION_LIMIT) -> dict:
+        """
+        Builds the paramters for use in announce
+        :param compact:
+        :param no_peer_id:
+        :param event:
+        :param numwant:
+        :return:
+        """
+        rv = {
+            "info_hash": self.torrent.meta.info_hash,
+            "peer_id": self.peer_id,
+            "port": self.port,
+            "uploaded": str(self.torrent.total_uploaded),
+            "downloaded": str(self.torrent.total_downloaded),
+            "left": str(self.torrent.left),
+            "key": self.torrent.key,
+            "compact": compact,
+            "no_peer_id": no_peer_id
+        }
 
-    if ip is not None:
-        get_params["ip"] = ip
+        if event is not None:
+            rv["event"] = event.name
 
-    if numwant is not None:
-        get_params["numwant"] = numwant
+        if self.ip is not None:
+            rv["ip"] = self.ip
 
-    if trackerid is not None:
-        get_params["trackerid"] = trackerid
+        if numwant is not None:
+            rv["numwant"] = numwant
 
-    # TODO: Stop creating as session everytime we need to announce
-    async with aiohttp.ClientSession() as session:
+        if self.tracker_id is not None:
+            rv["trackerid"] = self.tracker_id
 
-        url = announce_url + "?" + urlencode(get_params)
+        return rv
 
-        async with session.get(url) as resp:
+    async def _send_announce(self, announce_url: str, params: dict):
+        url = announce_url + "?" + urlencode(params)
 
-            if resp.status == 200:
-                return TrackerResponse(bencoding.decode(await resp.read())[0])
+        async with self.http_client.get(url) as response:
+            if response.status == 200:
+                return TrackerResponse(bencoding.decode(await response.read())[0])
             else:
                 raise ConnectionError("Announce failed."
-                                      "Tracker's reponse: \"{}\"".format(await resp.text()))
+                                      "Tracker's reponse: \"{}\"".format(await response.text()))
 
-"""
-    async def announce(self, port: int, peer_id: bytes):
-        self._logger.info("Beginning anounce...")
+    async def announce(self, params: Optional[dict] = None) -> TrackerResponse:
+        if params is None:
+            params = self.build_get_params()
 
         # TODO: Add support for backups
         # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces
         # fail in the first list. Then, the sub-lists are rearragned so that the first successful trackers are first in
         # their sub-lists. http://bittorrent.org/beps/bep_0012.html
-        for announce_url in self.data.announce[0]:
-            self._logger.info("Announcing on " + announce_url)
+        for announce_url in self.torrent.meta.announce[0]:
+            response = await self._send_announce(announce_url=announce_url, params=params)
 
-            peer_count_request = max(peer.NEW_CONNECTION_LIMIT - len(self.peers), 0)
-            self._logger.info("Requesting {} peers".format(peer_count_request))
-
-            try:
-                response = await tracker.announce_tracker(self, peer_id, announce_url, port, numwant=peer_count_request)
-
-                if not response.sucessful:
-                    self._logger.warning("Announce on {} not successful. {}".format(announce_url, str(response)))
-                    continue
-
-                self._logger.info("Announce successful.")
-
-                if peer_count_request > 0:
-                    # Dump all the peers into the swarm
-                    new_peers = [p for p in response.peers if p not in self.swarm]
-                    self.swarm.extend(new_peers)
-                    self._logger.info("Adding {} new peers into the swarm. (Now {})".format(len(new_peers), len(self.swarm)))
-            except aiohttp.client_exceptions.ClientConnectionError:
-                self._logger.error("Failed to connect to tracker {}".format(announce_url))
+            if not response.sucessful:
+                self._logger.warning("Announce not successful. Tracker response " + response.failure_reason)
                 continue
-"""
+
+            return response
