@@ -7,20 +7,6 @@ import logging
 import math
 
 
-message_handlers = {}
-
-
-def message_handler(message_type):
-    """
-    Decorator used to bind message handler functions to PeerClient
-    :param message_type:
-    :return:
-    """
-    def decorator(func):
-        message_handlers[message_type] = func
-    return decorator
-
-
 class PeerClient:
     """
     Represents a connection to a peer. Handles incoming messages and sends out messages.
@@ -40,6 +26,40 @@ class PeerClient:
                                                      self.peer.port,
                                                      self.torrent.meta.info_hash)
 
+    async def _handle_choke(self, m: peer.ChokePeerMessage):
+        self._logger.debug("Got choke message.")
+        self.peer.is_choking = True
+
+    async def _handle_unchoke(self, m: peer.UnchokePeerMessage):
+        self._logger.debug("Got unchoke message.")
+        self.peer.is_choking = False
+
+    async def _handle_interested(self, m: peer.InterestedPeerMessage):
+        self._logger.debug("Got interested message.")
+        self.peer.is_interested = True
+
+    async def _handle_not_interested(self, m: peer.NotInterestedPeerMessage):
+        self._logger.debug("Got not interested message.")
+        self.peer.is_interested = False
+
+    async def _handle_have(self, m: peer.HavePeerMessage):
+        self._logger.debug("Got have message, piece {}.".format(m.piece_index))
+        self.peer.piecefield[m.piece_index] = 1
+
+    async def _handle_bitfield(self, m: peer.BitfieldPeerMessage):
+        b = Bitfield(int.from_bytes(m.bitfield, byteorder="big"))
+        self.peer.piecefield = b
+        self._logger.debug("Got bitfield message: {}".format(b))
+
+    async def _handle_request(self, m: peer.RequestPeerMessage):
+        pass
+
+    async def _handle_block(self, m: peer.BlockPeerMessage):
+        pass
+
+    async def _handle_port(self, m: peer.PortPeerMessage):
+        pass
+
     async def handle(self):
         """
         Handles incoming peer messages and responds.
@@ -48,59 +68,17 @@ class PeerClient:
             if type(message) == peer.KeepAlivePeerMessage:
                 self.writer.write(peer.KeepAlivePeerMessage().encode())
 
-            message_handlers[type(message)](self, message)
-
-
-@message_handler(peer.ChokePeerMessage)
-async def _handle_choke(pc: PeerClient, m: peer.ChokePeerMessage):
-    pc._logger.debug("Got choke message.")
-    pc.peer.is_choking = True
-
-
-@message_handler(peer.UnchokePeerMessage)
-async def _handle_unchoke(pc: PeerClient, m: peer.UnchokePeerMessage):
-    pc._logger.debug("Got unchoke message.")
-    pc.peer.is_choking = False
-
-
-@message_handler(peer.InterestedPeerMessage)
-async def _handle_interested(pc: PeerClient, m: peer.InterestedPeerMessage):
-    pc._logger.debug("Got interested message.")
-    pc.peer.is_interested = True
-
-
-@message_handler(peer.NotInterestedPeerMessage)
-async def _handle_not_interested(pc: PeerClient, m: peer.NotInterestedPeerMessage):
-    pc._logger.debug("Got not interested message.")
-    pc.peer.is_interested = False
-
-
-@message_handler(peer.HavePeerMessage)
-async def _handle_have(pc: PeerClient, m: peer.HavePeerMessage):
-    pc._logger.debug("Got have message, piece {}.".format(m.piece_index))
-    pc.peer.piecefield[m.piece_index] = 1
-
-
-@message_handler(peer.BitfieldPeerMessage)
-async def _handle_bitfield(pc: PeerClient, m: peer.BitfieldPeerMessage):
-    b = Bitfield(int.from_bytes(m.bitfield, byteorder="big"))
-    pc.peer.piecefield = b
-    pc._logger.debug("Got bitfield message: {}".format(b))
-
-
-@message_handler(peer.RequestPeerMessage)
-async def _handle_request(pc: PeerClient, m: peer.RequestPeerMessage):
-    pass
-
-
-@message_handler(peer.BlockPeerMessage)
-async def _handle_block(pc: PeerClient, m: peer.BlockPeerMessage):
-    pass
-
-
-@message_handler(peer.PortPeerMessage)
-async def _handle_port(pc: PeerClient, m: peer.PortPeerMessage):
-    pass
+            await {
+                peer.HavePeerMessage: self._handle_have,
+                peer.ChokePeerMessage: self._handle_choke,
+                peer.UnchokePeerMessage: self._handle_unchoke,
+                peer.InterestedPeerMessage: self._handle_interested,
+                peer.NotInterestedPeerMessage: self._handle_not_interested,
+                peer.BitfieldPeerMessage: self._handle_bitfield,
+                peer.RequestPeerMessage: self._handle_request,
+                peer.BlockPeerMessage: self._handle_block,
+                peer.PortPeerMessage: self._handle_port
+            }[type(message)](message)
 
 
 class Client:
@@ -142,7 +120,7 @@ class Client:
         # Wait for the handshake
         try:
             handshake = peer.HandshakeMessage.decode(await reader.read(49 + len(peer.PROTOCOL_STRING)))
-        except UnicodeDecodeError:
+        except UnicodeDecodeError or IndexError:
             # There was an error decoding the handshake
             # (likly the handshake was invalid)
             self._logger.debug("Dropped connection with {}. (Invalid handshake)".format(ip))
