@@ -115,7 +115,8 @@ class TrackerRequest:
             "left": str(self.torrent.left),
             "key": self.torrent.key,
             "compact": compact,
-            "no_peer_id": no_peer_id
+            "no_peer_id": no_peer_id,
+            "numwant": numwant if numwant is not None else self.torrent.needed_peer_amount
         }
 
         if event is not None:
@@ -124,16 +125,13 @@ class TrackerRequest:
         if self.ip is not None:
             rv["ip"] = self.ip
 
-        if numwant is not None:
-            rv["numwant"] = numwant
-
         if self.tracker_id is not None:
             rv["trackerid"] = self.tracker_id
 
         return rv
 
-    async def _send_announce(self, announce_url: str, params: dict):
-        url = announce_url + "?" + urlencode(params)
+    async def _send_announce(self, announce_url: str, **kwargs):
+        url = announce_url + "?" + urlencode(kwargs)
 
         async with self.http_client.get(url) as response:
             if response.status == 200:
@@ -142,19 +140,20 @@ class TrackerRequest:
                 raise ConnectionError("Announce failed."
                                       "Tracker's reponse: \"{}\"".format(await response.text()))
 
-    async def announce(self, **kwargs) -> TrackerResponse:
-        if kwargs is not None:
-            params = self.build_get_params(**kwargs)
+    async def announce(self, **kwargs):
+        params = self.build_get_params(**kwargs)
 
         # TODO: Add support for backups
         # Normally, you go through the first sub-list of URLs and then move to the second sub-list only if all the announces
         # fail in the first list. Then, the sub-lists are rearragned so that the first successful trackers are first in
         # their sub-lists. http://bittorrent.org/beps/bep_0012.html
         for announce_url in self.torrent.meta.announce[0]:
-            response = await self._send_announce(announce_url=announce_url, params=params)
+            self._logger.info("Announcing {} to {}.".format(self.torrent, announce_url))
+            response = await self._send_announce(announce_url=announce_url, **params)
 
             if not response.sucessful:
                 self._logger.warning("Announce not successful. Tracker response " + response.failure_reason)
                 continue
 
-            return response
+            self.torrent.insert_peers(response.peers)
+            self._logger.info("Announce successful! Received {} peers.".format(len(response.peers)))

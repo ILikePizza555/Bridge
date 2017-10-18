@@ -123,15 +123,14 @@ class Client:
         self._server_task = loop.create_task(asyncio.start_server(self.on_incoming, port=listen_port, loop=loop))
 
     def add_torrent(self, torrent: data.Torrent, client_session: aiohttp.ClientSession):
-        async def torrent_announce_loop():
+        async def torrent_announce_task():
             tr = tracker.TrackerRequest(client_session, torrent, self.peer_id, self.listen_port)
 
             while True:
-                resp = await tr.announce(numwant=torrent.needed_peer_amount)
-                torrent.insert_peers(resp.peers)
+                resp = await tr.announce()
                 await asyncio.sleep(resp.interval)
 
-        self._torrent_announce_tasks.append(self.loop.create_task(torrent_announce_loop()))
+        self._torrent_announce_tasks.append(self.loop.create_task(torrent_announce_task()))
         self._torrents.append(torrent)
 
     async def on_incoming(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
