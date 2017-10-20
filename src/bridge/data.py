@@ -11,8 +11,6 @@ import logging
 import math
 import random
 
-BLOCK_REQUEST_SIZE = 2**15  # Bytes
-
 class TorrentFile:
     """
     A file indicated by the torrent metadata
@@ -282,12 +280,12 @@ class Torrent:
         return max(peer.NEW_CONNECTION_LIMIT - len(self.swarm), 0)
 
     @property
-    def rare_pieces(self) -> List[Piece]:
+    def rare_pieces(self) -> List[int]:
         """
-        :return: A list of pieces, sorted by rarest first.
+        :return: A list of piece indexes, sorted by rarest piece first.
         """
 
-        return sorted(self.pieces, key=lambda i: calculate_rarity(self.swarm, i.piece_index))
+        return sorted(range(0, len(self.pieces)), key=lambda i: calculate_rarity(self.swarm, i))
 
     def insert_peer(self, p: peer.Peer):
         """
