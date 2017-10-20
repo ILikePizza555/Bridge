@@ -1,5 +1,5 @@
 from . import data, peer, tracker
-from typing import List, Callable, Optional
+from typing import List
 import asyncio
 import aiohttp
 import logging
@@ -51,19 +51,22 @@ class PeerClient:
         """
         Handles incoming peer messages and responds.
         """
-        async for message in await self.message_iter.load_generator():
-            if type(message) == peer.KeepAlivePeerMessage:
-                self.writer.write(peer.KeepAlivePeerMessage().encode())
+        while True:
+            async for message in await self.message_iter.load_generator():
+                if type(message) == peer.KeepAlivePeerMessage:
+                    self.writer.write(peer.KeepAlivePeerMessage().encode())
 
-            try:
-                await message.handle(self)
-            except NotImplementedError:
-                self.logger.warning("{} handler not implemented.".format(type(message)))
+                try:
+                    await message.handle(self)
+                except NotImplementedError:
+                    self.logger.warning("{} handler not implemented.".format(type(message)))
 
-        response = self.respond()
+            response = self.respond()
 
-        if response is not None:
-            await self.writer.write(response.encode())
+            if response is not None:
+                await self.writer.write(response.encode())
+
+            await asyncio.sleep(0.01)
 
 
 class Client:
