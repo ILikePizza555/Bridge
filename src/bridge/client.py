@@ -1,12 +1,10 @@
 from . import data, peer, tracker
+from pizza_utils.bitfield import Bitfield
 from typing import List
 import asyncio
 import aiohttp
 import logging
 import math
-
-
-BLOCK_REQUEST_SIZE = 2**15  # Bytes
 
 
 class PeerClient:
@@ -21,52 +19,66 @@ class PeerClient:
         self.writer = writer
 
         self.message_iter = peer.PeerMessageIterator(reader)
-        self.logger = logging.getLogger("bridge.PeerClient.{}".format(p.peer_id))
-
-        self.piece = None
+        self._logger = logging.getLogger("bridge.PeerClient.{}".format(p.peer_id))
 
     def __repr__(self):
         return "PeerClient to: {}:{}; for {}".format(self.peer.ip,
                                                      self.peer.port,
                                                      self.torrent.meta.info_hash)
 
-    def respond(self) -> peer.PeerMessage:
-        if not self.peer.is_interested:
-            self.logger.debug("Sending interest to peer.")
-            return peer.InterestedPeerMessage()
+    async def _handle_choke(self, m: peer.ChokePeerMessage):
+        self._logger.debug("Got choke message.")
+        self.peer.is_choking = True
 
-        if not self.peer.is_choking:
-            if self.piece is None:
-                # We have no piece, put in a request for one
-                # TODO: This logic belongs in Torrent
-                p_i = next(x for x in self.torrent.rare_pieces if self.peer.piecefield[x] != 0)
-                self.piece = self.torrent.claim_piece(p_i)
+    async def _handle_unchoke(self, m: peer.UnchokePeerMessage):
+        self._logger.debug("Got unchoke message.")
+        self.peer.is_choking = False
 
-                return peer.RequestPeerMessage(self.piece.piece_index, 0, BLOCK_REQUEST_SIZE)
-            else:
-                # TODO: This logic belongs in Piece
-                return peer.RequestPeerMessage(self.piece.piece_index, len(self.piece.buffer), BLOCK_REQUEST_SIZE)
+    async def _handle_interested(self, m: peer.InterestedPeerMessage):
+        self._logger.debug("Got interested message.")
+        self.peer.is_interested = True
+
+    async def _handle_not_interested(self, m: peer.NotInterestedPeerMessage):
+        self._logger.debug("Got not interested message.")
+        self.peer.is_interested = False
+
+    async def _handle_have(self, m: peer.HavePeerMessage):
+        self._logger.debug("Got have message, piece {}.".format(m.piece_index))
+        self.peer.piecefield[m.piece_index] = 1
+
+    async def _handle_bitfield(self, m: peer.BitfieldPeerMessage):
+        b = Bitfield(int.from_bytes(m.bitfield, byteorder="big"))
+        self.peer.piecefield = b
+        self._logger.debug("Got bitfield message: {}".format(b))
+
+    async def _handle_request(self, m: peer.RequestPeerMessage):
+        pass
+
+    async def _handle_block(self, m: peer.BlockPeerMessage):
+        pass
+
+    async def _handle_port(self, m: peer.PortPeerMessage):
+        pass
 
     async def handle(self):
         """
         Handles incoming peer messages and responds.
         """
-        while True:
-            async for message in await self.message_iter.load_generator():
-                if type(message) == peer.KeepAlivePeerMessage:
-                    self.writer.write(peer.KeepAlivePeerMessage().encode())
+        async for message in await self.message_iter.load_generator():
+            if type(message) == peer.KeepAlivePeerMessage:
+                self.writer.write(peer.KeepAlivePeerMessage().encode())
 
-                try:
-                    await message.handle(self)
-                except NotImplementedError:
-                    self.logger.warning("{} handler not implemented.".format(type(message)))
-
-            response = self.respond()
-
-            if response is not None:
-                await self.writer.write(response.encode())
-
-            await asyncio.sleep(0.01)
+            await {
+                peer.HavePeerMessage: self._handle_have,
+                peer.ChokePeerMessage: self._handle_choke,
+                peer.UnchokePeerMessage: self._handle_unchoke,
+                peer.InterestedPeerMessage: self._handle_interested,
+                peer.NotInterestedPeerMessage: self._handle_not_interested,
+                peer.BitfieldPeerMessage: self._handle_bitfield,
+                peer.RequestPeerMessage: self._handle_request,
+                peer.BlockPeerMessage: self._handle_block,
+                peer.PortPeerMessage: self._handle_port
+            }[type(message)](message)
 
 
 class Client:

@@ -1,7 +1,6 @@
-from . import client
 from asyncio import StreamReader, IncompleteReadError
 from pizza_utils.bitfield import Bitfield
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 import logging
 import struct
 import socket
@@ -48,9 +47,6 @@ class PeerMessage:
         """Encodes this message into a string of bytes to be sent over the network"""
         return struct.pack(">Ib", self.length, self.message_id)
 
-    async def handle(self, p: "client.PeerClient"):
-        raise NotImplementedError()
-
 
 class KeepAlivePeerMessage(PeerMessage, message_id=None, length=0):
     """
@@ -61,27 +57,19 @@ class KeepAlivePeerMessage(PeerMessage, message_id=None, length=0):
 
 
 class ChokePeerMessage(PeerMessage, message_id=0):
-    async def handle(self, p: "client.PeerClient"):
-        p.logger.debug("Got choke message.")
-        p.peer.is_choking = True
+    pass
 
 
 class UnchokePeerMessage(PeerMessage, message_id=1):
-    async def handle(self, p:"client.PeerClient"):
-        p.logger.debug("Got unchoke message.")
-        p.peer.is_choking = False
+    pass
 
 
 class InterestedPeerMessage(PeerMessage, message_id=2):
-    async def handle(self, p: "client.PeerClient"):
-        p.logger.debug("Got interested message.")
-        p.peer.is_interested = True
+    pass
 
 
 class NotInterestedPeerMessage(PeerMessage, message_id=3):
-    async def handle(self, p: "client.PeerClient"):
-        p.logger.debug("Got not interested message.")
-        p.peer.is_interested = False
+    pass
 
 
 class HavePeerMessage(PeerMessage, message_id=4, length=5):
@@ -98,10 +86,6 @@ class HavePeerMessage(PeerMessage, message_id=4, length=5):
     def encode(self) -> bytes:
         return super().encode() + struct.pack(">I", self.piece_index)
 
-    async def handle(self, p: "client.PeerClient"):
-        p.logger.debug("Got have message, piece {}.".format(self.piece_index))
-        p.peer.piecefield[self.piece_index] = 1
-
 
 class BitfieldPeerMessage(PeerMessage, message_id=5):
     def __init__(self, bitfield: bytes):
@@ -117,11 +101,6 @@ class BitfieldPeerMessage(PeerMessage, message_id=5):
 
     def encode(self) -> bytes:
         return super().encode() + self.bitfield
-
-    async def handle(self, p: "client.PeerClient"):
-        b = Bitfield(int.from_bytes(self.bitfield, byteorder="big"))
-        p.peer.piecefield = b
-        p.logger.debug("Got bitfield message: {}".format(b))
 
 
 class RequestPeerMessage(PeerMessage, message_id=6, length=13):
@@ -216,7 +195,7 @@ class PeerMessageIterator:
         del self.buffer[:amount]
         return rv
 
-    async def load_generator(self) -> AsyncGenerator[None, PeerMessage]:
+    async def load_generator(self) -> AsyncGenerator:
         """
         Attempts to fill the buffer, and returns a generator.
         :return:
@@ -233,6 +212,7 @@ class PeerMessageIterator:
             self.buffer.append(e.partial)
         except ConnectionAbortedError as e:
             logger.error("Error reading socket! {}".format(e.strerror))
+
 
         return self.gen()
 
