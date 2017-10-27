@@ -1,9 +1,10 @@
 from bridge import peer
+from typing import List, Tuple
 import asyncio
 import pytest
 import random
 
-_test_data = [
+_test_data: Tuple[Tuple[peer.PeerMessage, bytes]] = (
     (peer.KeepAlivePeerMessage(), bytes(4)),
     (peer.ChokePeerMessage(), bytes([0, 0, 0, 1, 0])),
     (peer.UnchokePeerMessage(), bytes([0, 0, 0, 1, 1])),
@@ -15,7 +16,32 @@ _test_data = [
     (peer.BlockPeerMessage(7, 8, b"abc"), bytes([0, 0, 0, 12, 7, 0, 0, 0, 7, 0, 0, 0, 8, 97, 98, 99])),
     (peer.CancelPeerMessage(9, 10, 11), bytes([0, 0, 0, 13, 8, 0, 0, 0, 9, 0, 0, 0, 10, 0, 0, 0, 11])),
     (peer.PortPeerMessage(128), bytes([0, 0, 0, 3, 9, 0, 128]))
-]
+)
+
+_test_stream_data: Tuple[Tuple[bytes], Tuple[peer.PeerMessage]]= tuple(reversed(zip(
+    _test_data[0], _test_data[2], _test_data[3], _test_data[1], _test_data[6],
+    _test_data[5], _test_data[7], _test_data[0], _test_data[4], _test_data[8],
+    _test_data[0], _test_data[1], _test_data[4], _test_data[2], _test_data[3]
+)))
+
+
+def build_reader(buffer_data, monkeypatch, reader_size=-1, **kwargs):
+    mock_buffer = bytearray(buffer_data)
+
+    async def mock_read(b):
+        if len(mock_buffer) == 0:
+            raise StopAsyncIteration()
+
+        read_size = b if reader_size <= 0 else min(reader_size, b)
+
+        data = bytes(mock_buffer[:read_size])
+        del mock_buffer[:read_size]
+        return data
+
+    test_reader = asyncio.StreamReader()
+    monkeypatch.setattr(test_reader, 'read', mock_read)
+
+    return peer.PeerMessageIterator(test_reader, **kwargs)
 
 
 @pytest.mark.parametrize("message,expected", [
@@ -49,24 +75,87 @@ def test_encoding(message: peer.PeerMessage, expected: bytes):
     pytest.param(*_test_data[9][::-1], id="decode_cancel"),
     pytest.param(*_test_data[10][::-1], id="decode_port")
 ])
-async def test_single_stream_iteration(monkeypatch, buffer_data: bytes, expected: peer.PeerMessage):
-    # Setting up mock tools
-    mockbuffer = bytearray(buffer_data)
-
-    async def mockread(b):
-        if len(mockbuffer) == 0:
-            raise StopAsyncIteration()
-
-        data = bytes(mockbuffer[:b])
-        del mockbuffer[:b]
-        return data
-
-    test_reader = asyncio.StreamReader()
-    monkeypatch.setattr(test_reader, 'read', mockread)
+async def test_individual_iteration(monkeypatch, buffer_data: bytes, expected: peer.PeerMessage):
+    """
+    Tests that the iterator can handle each of the message individually.
+    :param monkeypatch:
+    :param buffer_data:
+    :param expected:
+    :return:
+    """
+    message_iterator = build_reader(buffer_data, monkeypatch)
 
     # Actual test
-    async for message in peer.PeerMessageIterator(test_reader):
+    async for message in await message_iterator.load_generator():
         assert message == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("buffer_data,expected", [
+    pytest.param(*_test_stream_data)
+])
+async def test_single_stream_iteration(monkeypatch,
+                                       buffer_data: bytes,
+                                       expected: List[peer.PeerMessage]):
+    """
+    Tests that the iterator can handle a stream of messages.
+    :param monkeypatch:
+    :param buffer_data:
+    :param expected:
+    :return:
+    """
+    message_iterator = build_reader(buffer_data, monkeypatch)
+
+    actual = [message async for message in await message_iterator.load_generator()]
+
+    assert actual == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("buffer_data,reader_size,expected", [
+    pytest.param(_test_stream_data[0], 5, _test_stream_data[1])
+])
+async def test_multi_stream_reader_iteration(monkeypatch,
+                                             buffer_data: bytes,
+                                             reader_size: int,
+                                             expected: List[List[peer.PeerMessage]]):
+    """Tests that an iterator can handle an interrupted stream of messages because of incomplete reads."""
+    message_iterator = build_reader(buffer_data, monkeypatch, reader_size=reader_size)
+
+    actual = []
+
+    while True:
+        a = [m async for m in await message_iterator.load_generator()]
+
+        if len(a) == 0:
+            break
+
+        actual.append(a)
+
+    assert actual == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("buffer_data,buffer_size,expected", [
+    pytest.param(_test_stream_data[0], 5, _test_stream_data[1])
+])
+async def test_multi_stream_buffer_iteration(monkeypatch,
+                                             buffer_data: bytes,
+                                             buffer_size: int,
+                                             expected: List[List[peer.PeerMessage]]):
+    """Tests that an iterator can handle an interrupted stream of messages because of a small buffer size"""
+    message_iterator = build_reader(buffer_data, monkeypatch, buffer_size=buffer_size)
+    actual = []
+
+    while True:
+        a = [m async for m in await message_iterator.load_generator()]
+
+        if len(a) == 0:
+            break
+
+        actual.append(a)
+
+    assert actual == expected
 
 
 def test_decode_handshake():

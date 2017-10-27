@@ -1,6 +1,6 @@
 from asyncio import StreamReader, IncompleteReadError
 from pizza_utils.bitfield import Bitfield
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 import logging
 import struct
 import socket
