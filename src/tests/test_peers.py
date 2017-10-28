@@ -29,12 +29,16 @@ _test_stream_expected, _test_stream_bytes = zip(
 _test_stream_bytes = reduce(concat, _test_stream_bytes, b'')
 
 
+class StopTest(Exception):
+    pass
+
+
 def build_reader(buffer_data: bytes, monkeypatch, reader_size=-1, **kwargs):
     mock_buffer = bytearray(buffer_data)
 
     async def mock_read(b):
         if len(mock_buffer) == 0:
-            raise StopAsyncIteration()
+            raise StopTest
 
         read_size = b if reader_size <= 0 else min(reader_size, b)
 
@@ -122,21 +126,18 @@ async def test_single_stream_iteration(monkeypatch,
 async def test_multi_stream_reader_iteration(monkeypatch,
                                              buffer_data: bytes,
                                              reader_size: int,
-                                             expected: List[List[peer.PeerMessage]]):
+                                             expected: Tuple[peer.PeerMessage]):
     """Tests that an iterator can handle an interrupted stream of messages because of incomplete reads."""
     message_iterator = build_reader(buffer_data, monkeypatch, reader_size=reader_size)
 
     actual = []
 
-    while True:
-        a = list(await message_iterator.load_iterator())
-
-        if len(a) == 0:
-            break
-
-        actual.append(a)
-
-    assert actual == expected
+    try:
+        while True:
+            a = tuple(await message_iterator.load_iterator())
+            actual.extend(a)
+    except StopTest:
+        assert tuple(actual) == expected
 
 
 @pytest.mark.asyncio
@@ -146,20 +147,17 @@ async def test_multi_stream_reader_iteration(monkeypatch,
 async def test_multi_stream_buffer_iteration(monkeypatch,
                                              buffer_data: bytes,
                                              buffer_size: int,
-                                             expected: List[List[peer.PeerMessage]]):
+                                             expected: Tuple[peer.PeerMessage]):
     """Tests that an iterator can handle an interrupted stream of messages because of a small buffer size"""
     message_iterator = build_reader(buffer_data, monkeypatch, buffer_size=buffer_size)
     actual = []
 
-    while True:
-        a = list(await message_iterator.load_iterator())
-
-        if len(a) == 0:
-            break
-
-        actual.append(a)
-
-    assert actual == expected
+    try:
+        while True:
+            a = tuple(await message_iterator.load_iterator())
+            actual.extend(a)
+    except StopTest:
+        assert tuple(actual) == expected
 
 
 def test_decode_handshake():
