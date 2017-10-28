@@ -233,6 +233,9 @@ class PeerMessageIterator:
             return rv
 
     def __init__(self, reader: StreamReader, buffer_size: int = 1000):
+        if buffer_size < 4:
+            raise ValueError("buffer_size is too low. Expected >= 4, got {}".format(buffer_size))
+
         self._reader = reader
         self.buffer_size = buffer_size
         self._iter = PeerMessageIterator.Iter(bytearray())
