@@ -1,5 +1,7 @@
 from bridge import peer
 from typing import List, Tuple
+from functools import reduce
+from operator import concat
 import asyncio
 import pytest
 import random
@@ -18,14 +20,16 @@ _test_data: Tuple[Tuple[peer.PeerMessage, bytes]] = (
     (peer.PortPeerMessage(128), bytes([0, 0, 0, 3, 9, 0, 128]))
 )
 
-_test_stream_data: Tuple[Tuple[bytes], Tuple[peer.PeerMessage]]= tuple(reversed(zip(
+_test_stream_expected, _test_stream_bytes = zip(
     _test_data[0], _test_data[2], _test_data[3], _test_data[1], _test_data[6],
     _test_data[5], _test_data[7], _test_data[0], _test_data[4], _test_data[8],
     _test_data[0], _test_data[1], _test_data[4], _test_data[2], _test_data[3]
-)))
+)
+
+_test_stream_bytes = reduce(concat, _test_stream_bytes, b'')
 
 
-def build_reader(buffer_data, monkeypatch, reader_size=-1, **kwargs):
+def build_reader(buffer_data: bytes, monkeypatch, reader_size=-1, **kwargs):
     mock_buffer = bytearray(buffer_data)
 
     async def mock_read(b):
@@ -86,13 +90,13 @@ async def test_individual_iteration(monkeypatch, buffer_data: bytes, expected: p
     message_iterator = build_reader(buffer_data, monkeypatch)
 
     # Actual test
-    async for message in await message_iterator.load_generator():
+    for message in await message_iterator.load_iterator():
         assert message == expected
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("buffer_data,expected", [
-    pytest.param(*_test_stream_data)
+    pytest.param(_test_stream_bytes, _test_stream_expected)
 ])
 async def test_single_stream_iteration(monkeypatch,
                                        buffer_data: bytes,
@@ -106,14 +110,14 @@ async def test_single_stream_iteration(monkeypatch,
     """
     message_iterator = build_reader(buffer_data, monkeypatch)
 
-    actual = [message async for message in await message_iterator.load_generator()]
+    actual = tuple(await message_iterator.load_iterator())
 
     assert actual == expected
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("buffer_data,reader_size,expected", [
-    pytest.param(_test_stream_data[0], 5, _test_stream_data[1])
+    pytest.param(_test_stream_bytes, 5, _test_stream_expected)
 ])
 async def test_multi_stream_reader_iteration(monkeypatch,
                                              buffer_data: bytes,
@@ -125,7 +129,7 @@ async def test_multi_stream_reader_iteration(monkeypatch,
     actual = []
 
     while True:
-        a = [m async for m in await message_iterator.load_generator()]
+        a = list(await message_iterator.load_iterator())
 
         if len(a) == 0:
             break
@@ -137,7 +141,7 @@ async def test_multi_stream_reader_iteration(monkeypatch,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("buffer_data,buffer_size,expected", [
-    pytest.param(_test_stream_data[0], 5, _test_stream_data[1])
+    pytest.param(_test_stream_bytes, 5, _test_stream_expected)
 ])
 async def test_multi_stream_buffer_iteration(monkeypatch,
                                              buffer_data: bytes,
@@ -148,7 +152,7 @@ async def test_multi_stream_buffer_iteration(monkeypatch,
     actual = []
 
     while True:
-        a = [m async for m in await message_iterator.load_generator()]
+        a = list(await message_iterator.load_iterator())
 
         if len(a) == 0:
             break

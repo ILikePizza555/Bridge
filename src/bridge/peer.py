@@ -1,6 +1,6 @@
 from asyncio import StreamReader, IncompleteReadError
 from pizza_utils.bitfield import Bitfield
-from typing import AsyncGenerator
+from typing import AsyncIterator
 import logging
 import struct
 import socket
@@ -185,39 +185,17 @@ class PortPeerMessage(PeerMessage, message_id=9, length=3):
 
 
 class PeerMessageIterator:
-    def __init__(self, reader: StreamReader, buffer_size: int = 1000):
-        self._reader = reader
-        self.buffer_size = buffer_size
-        self.buffer = bytearray()
+    class Iter:
+        def __init__(self, buffer: bytearray):
+            self.buffer = buffer
 
-    def cut(self, amount):
-        rv = self.buffer[:amount]
-        del self.buffer[:amount]
-        return rv
+        def __iter__(self):
+            return self
 
-    async def load_generator(self) -> AsyncGenerator:
-        """
-        Attempts to fill the buffer, and returns a generator.
-        :return:
-        """
-        try:
-            read_amount = self.buffer_size - len(self.buffer)
+        def __next__(self):
+            if len(self.buffer) <= 0:
+                raise StopIteration()
 
-            if read_amount > 0:
-                data = await self._reader.read(read_amount)
-                self.buffer.extend(data)
-
-        except IncompleteReadError as e:
-            logger.warning("Only read {} bytes into buffer (wanted {}).".format(len(e.partial), read_amount))
-            self.buffer.append(e.partial)
-        except ConnectionAbortedError as e:
-            logger.error("Error reading socket! {}".format(e.strerror))
-
-
-        return self.gen()
-
-    async def gen(self):
-        while len(self.buffer) > 0:
             try:
                 # Length is a 4-byte big endian integer, and the first of the message
                 # We don't cut the buffer just in case the full packet isn't loaded
@@ -225,14 +203,14 @@ class PeerMessageIterator:
 
                 # If the length is 0, no need to read data, it's a keep alive
                 if length == 0:
-                    yield KeepAlivePeerMessage()
+                    return KeepAlivePeerMessage()
             except KeyError:
                 logger.warning("Ran out of buffer.")
-                break
+                raise StopIteration()
 
             if len(self.buffer) < length + 4:
                 # The buffer doesn't contain the full packet. Stop iteration.
-                break
+                raise StopIteration()
             else:
                 # Cut the length (which is already parsed) off
                 del self.buffer[:4]
@@ -242,9 +220,37 @@ class PeerMessageIterator:
             message_id = data[0]
 
             try:
-                yield PeerMessage.id_map[message_id].decode(data[1:])
+                return PeerMessage.id_map[message_id].decode(data[1:])
             except KeyError:
                 logger.error("No message found with id {}".format(message_id))
+
+        def cut(self, amount):
+            rv = self.buffer[:amount]
+            del self.buffer[:amount]
+            return rv
+
+    def __init__(self, reader: StreamReader, buffer_size: int = 1000):
+        self._reader = reader
+        self.buffer_size = buffer_size
+        self._iter = PeerMessageIterator.Iter(bytearray())
+
+    async def load_iterator(self) -> Iter:
+        """
+        Attempts to fill the buffer, and returns a generator.
+        :return:
+        """
+        try:
+            read_amount = self.buffer_size - len(self._iter.buffer)
+
+            if read_amount > 0:
+                data = await self._reader.read(read_amount)
+                self._iter.buffer.extend(data)
+
+        except ConnectionAbortedError as e:
+            logger.error("Error reading socket! {}".format(e.strerror))
+
+        return self._iter
+
 
 
 class HandshakeMessage:
