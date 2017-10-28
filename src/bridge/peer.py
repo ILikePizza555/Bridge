@@ -32,7 +32,7 @@ class PeerMessage:
 
         return cls
 
-    def __str__(self):
+    def __repr__(self):
         return "{}(id: {}, length: {})".format(self.__class__.__name__, self.message_id, self.length)
 
     def __eq__(self, other):
@@ -193,7 +193,9 @@ class PeerMessageIterator:
             return self
 
         def __next__(self):
-            if len(self.buffer) <= 0:
+            # The smallest packet we can have is a keep alive.
+            # Otherwise, the iterator is useless.
+            if len(self.buffer) <= 4:
                 raise StopIteration()
 
             try:
@@ -203,6 +205,7 @@ class PeerMessageIterator:
 
                 # If the length is 0, no need to read data, it's a keep alive
                 if length == 0:
+                    del self.buffer[:4]
                     return KeepAlivePeerMessage()
             except KeyError:
                 logger.warning("Ran out of buffer.")
