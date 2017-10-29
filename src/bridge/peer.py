@@ -185,78 +185,80 @@ class PortPeerMessage(PeerMessage, message_id=9, length=3):
 
 
 class PeerMessageIterator:
-    class Iter:
-        def __init__(self, buffer: bytearray):
-            self.buffer = buffer
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            # The smallest packet we can have is a keep alive.
-            # Otherwise, the iterator is useless.
-            if len(self.buffer) <= 4:
-                raise StopIteration()
-
-            try:
-                # Length is a 4-byte big endian integer, and the first of the message
-                # We don't cut the buffer just in case the full packet isn't loaded
-                length, = struct.unpack(">I", self.buffer[:4])
-
-                # If the length is 0, no need to read data, it's a keep alive
-                if length == 0:
-                    del self.buffer[:4]
-                    return KeepAlivePeerMessage()
-            except KeyError:
-                logger.warning("Ran out of buffer.")
-                raise StopIteration()
-
-            if len(self.buffer) < length + 4:
-                # The buffer doesn't contain the full packet. Stop iteration.
-                raise StopIteration()
-            else:
-                # Cut the length (which is already parsed) off
-                del self.buffer[:4]
-
-            # Read out only the length of the message, parse the message id, then decode the message
-            data = self.cut(length)
-            message_id = data[0]
-
-            try:
-                return PeerMessage.id_map[message_id].decode(data[1:])
-            except KeyError:
-                logger.error("No message found with id {}".format(message_id))
-
-        def cut(self, amount):
-            rv = self.buffer[:amount]
-            del self.buffer[:amount]
-            return rv
-
     def __init__(self, reader: StreamReader, buffer_size: int = 1000):
         if buffer_size < 4:
             raise ValueError("buffer_size is too low. Expected >= 4, got {}".format(buffer_size))
 
-        self._reader = reader
+        self.buffer = bytearray()
         self.buffer_size = buffer_size
-        self._iter = PeerMessageIterator.Iter(bytearray())
 
-    async def load_iterator(self) -> Iter:
+        self._reader = reader
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        # The smallest packet we can have is a keep alive.
+        # Otherwise, the iterator is useless.
+        if len(self.buffer) <= 4:
+            raise StopIteration()
+
+        try:
+            # Length is a 4-byte big endian integer, and the first of the message
+            # We don't cut the buffer just in case the full packet isn't loaded
+            length, = struct.unpack(">I", self.buffer[:4])
+
+            # If the length is 0, no need to read data, it's a keep alive
+            if length == 0:
+                del self.buffer[:4]
+                return KeepAlivePeerMessage()
+        except KeyError:
+            logger.warning("Ran out of buffer.")
+            raise StopIteration()
+
+        if len(self.buffer) < length + 4:
+            # The buffer doesn't contain the full packet.
+            # Raise the size of the buffer, and stop iteration.
+            self.buffer_size = max(length + 4, self.buffer_size)
+            raise StopIteration()
+        else:
+            # Cut the length (which is already parsed) off
+            del self.buffer[:4]
+
+        # Read out only the length of the message, parse the message id, then decode the message
+        data = self.cut(length)
+        message_id = data[0]
+
+        try:
+            return PeerMessage.id_map[message_id].decode(data[1:])
+        except KeyError:
+            logger.error("No message found with id {}".format(message_id))
+
+    def cut(self, amount):
+        rv = self.buffer[:amount]
+        del self.buffer[:amount]
+        return rv
+
+    def clear(self):
+        # Clears the buffer
+        del self.buffer[:]
+
+    async def load_iterator(self):
         """
-        Attempts to fill the buffer, and returns a generator.
+        Attempts to fill the buffer, and returns am iterator.
         :return:
         """
         try:
-            read_amount = self.buffer_size - len(self._iter.buffer)
+            read_amount = self.buffer_size - len(self.buffer)
 
             if read_amount > 0:
                 data = await self._reader.read(read_amount)
-                self._iter.buffer.extend(data)
+                self.buffer.extend(data)
 
         except ConnectionAbortedError as e:
             logger.error("Error reading socket! {}".format(e.strerror))
 
-        return self._iter
-
+        return iter(self)
 
 
 class HandshakeMessage:
