@@ -11,6 +11,7 @@ import logging
 import math
 import random
 
+
 class TorrentFile:
     """
     A file indicated by the torrent metadata
@@ -33,17 +34,6 @@ class TorrentFile:
         end = self.piece_pointer + math.ceil(self.size / piece_length)
 
         return piece_index >= self.piece_pointer and piece_length <= end
-
-
-def calculate_rarity(peer_list: list, piece_index: int) -> int:
-    """Maps rarity to a list of piece indexes"""
-
-    rarity = 0
-    for p in peer_list:
-        if p.piecefield[piece_index] > 0:
-            rarity = rarity + 1
-
-    return rarity
 
 
 class InvalidTorrentError(Exception):
@@ -235,7 +225,7 @@ class Torrent:
         self.total_downloaded = 0
 
         l = self.meta.piece_length
-        self.pieces = tuple(Piece(h, i, l) for h, i in enumerate(self.meta.pieces))
+        self.pieces = tuple(Piece(h, i, l) for i, h in enumerate(self.meta.pieces))
         self.piece_holds = []
 
         # Unique key to identify the torrent
@@ -280,12 +270,27 @@ class Torrent:
         return max(peer.NEW_CONNECTION_LIMIT - len(self.swarm), 0)
 
     @property
-    def rare_pieces(self) -> List[int]:
+    def rare_pieces(self) -> List[Piece]:
         """
         :return: A list of piece indexes, sorted by rarest piece first.
         """
 
-        return sorted(range(0, len(self.pieces)), key=lambda i: calculate_rarity(self.swarm, i))
+        return sorted(self.pieces, key=self.calculate_rarity)
+
+    def calculate_rarity(self, piece: Optional[int, Piece]) -> int:
+        """
+        Calculates a piece's rarity, which is the count of peers that have that piece.
+        :param piece: The index of the piece, or the piece object.
+        :return:
+        """
+        if type(piece) == int:
+            piece = self.pieces[piece]
+
+        rarity = 0
+        for peer in self.swarm:
+            if peer.piecefield[piece.piece_index] > 0:
+                rarity += 1
+        return rarity
 
     def insert_peer(self, p: peer.Peer):
         """
@@ -308,10 +313,11 @@ class Torrent:
         :return:
         """
 
-        if i not in self.swarm_holds:
-            rv = self.swarm[i]
-            rv.index = i
-            return rv
+        p = self.swarm[i]
+
+        if p not in self.swarm_holds:
+            self.swarm_holds.append(p)
+            return p
 
         return None
 
@@ -321,17 +327,21 @@ class Torrent:
         :param p:
         :return:
         """
-        self.swarm_holds.remove(p.index)
+        self.swarm_holds.remove(p)
 
-    def claim_piece(self, i: int) -> Optional[Piece]:
-        if i not in self.piece_holds:
-            self.piece_holds.append(i)
-            return self.pieces[i]
-
-        return None
+    def claim_piece(self, b: Bitfield) -> Piece:
+        """
+        Finds a piece, places a hold on it, and returns it.
+        :param b: Bitfield representing peer's state.
+        :return:
+        """
+        for p in self.rare_pieces:
+            if b[p.piece_index] > 0 and p not in self.piece_holds:
+                self.piece_holds.append(p)
+                return p
 
     def return_piece(self, p: Piece):
-        self.piece_holds.remove(p.piece_index)
+        self.piece_holds.remove(p)
 
     def find_file(self, piece: Union[int, Piece]) -> TorrentFile:
         """
@@ -342,10 +352,12 @@ class Torrent:
         """
         if type(piece) == int:
             if piece < 0 or piece >= len(self.pieces):
-                raise IndexError("parameter piece ({}) is out of bounds [0, {})".format(piece, len(self.pieces)))
+                raise IndexError("Parameter piece ({}) is out of bounds [0, {})".format(piece, len(self.pieces)))
             index = piece
         elif isinstance(piece, Piece):
             index = piece.piece_index
+        else:
+            raise TypeError("Parameter piece is of the wrong type.")
 
         for f in self.meta.files:
             if f.piece_in_range(index, self.meta.piece_length):
