@@ -284,7 +284,7 @@ class Torrent:
 
         return sorted(self.pieces, key=self.calculate_rarity)
 
-    def calculate_rarity(self, piece: Optional[int, Piece]) -> int:
+    def calculate_rarity(self, piece: Union[int, Piece]) -> int:
         """
         Calculates a piece's rarity, which is the count of peers that have that piece.
         :param piece: The index of the piece, or the piece object.

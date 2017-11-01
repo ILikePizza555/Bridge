@@ -37,19 +37,13 @@ async def load_files() -> List[data.Torrent]:
 
 
 async def start_app(loop: asyncio.AbstractEventLoop):
-    try:
-        print("Starting app. Listening on port {}".format(listen_port))
+    print("Starting app. Listening on port {}".format(listen_port))
 
-        peer_client = client.Client(loop, peer_id, listen_port)
+    peer_client = client.Client(loop, peer_id, listen_port)
 
-        for t in await load_files():
-            app_logger.info("Adding torrent {}".format(t))
-            peer_client.add_torrent(t, http_session)
-
-    except Exception:
-        traceback.print_exc()
-        app_logger.critical("Shutdown due to error.")
-        loop.stop()
+    for t in await load_files():
+        app_logger.info("Adding torrent {}".format(t))
+        peer_client.add_torrent(t, http_session)
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()

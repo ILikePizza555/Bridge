@@ -78,19 +78,33 @@ class PeerClient:
             while self.piece.state != data.Piece.State.SAVED:
                 if self.piece.state == data.Piece.State.EMPTY:
                     # Continue downloaded the piece
-                    yield peer.RequestPeerMessage(*self.piece.get_block(), BLOCK_REQUEST_SIZE)
+                    index = self.piece.piece_index
+                    offset = len(self.piece.buffer)
+
+                    self._logger.info("Sending a request for block {} offset {}".format(
+                        index, offset
+                    ))
+
+                    yield peer.RequestPeerMessage(index, offset, BLOCK_REQUEST_SIZE)
                     continue
                 elif self.piece.state == data.Piece.State.FULL:
                     if not await self.piece.verify():
                         # Piece did not verify, add it back to the pool & reset state machine
+                        self._logger.info("Piece failed to verify, resetting.")
+
                         self.piece.reset()
                         break
                 elif self.piece.state == data.Piece.State.VERIFIED:
+                    self._logger.info("Saving piece.")
+
                     torrent_file = self.torrent.find_file(self.piece)
                     await self.piece.save(torrent_file)
 
+                    print(self.torrent)
+
             self.torrent.return_piece(self.piece)
             self.piece = None
+            return
 
     async def handle(self):
         """
