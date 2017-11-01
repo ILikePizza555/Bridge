@@ -73,6 +73,13 @@ class Piece:
             self.state, self.piece_hash, self.piece_index, self.piece_size
         )
 
+    def get_block(self):
+        return self.piece_index, len(self.buffer)
+
+    def reset(self):
+        del self.buffer[:]
+        self.state = Piece.State.EMPTY
+
     @enforce_state("state", State.EMPTY)
     async def load(self, offset: int, data: bytes):
         """Loads data into the buffer"""
@@ -89,7 +96,8 @@ class Piece:
             return False
 
     @enforce_state("state", State.VERIFIED)
-    async def save(self, file: TorrentFile, offset: int = 0):
+    async def save(self, file: TorrentFile):
+        offset = self.piece_index - file.piece_pointer
         byte_offset = offset * self.piece_size
 
         with open(file.path + file.filename, mode="w+b") as fh:
@@ -97,8 +105,7 @@ class Piece:
             fh.write(self.buffer)
 
         # Clean up and free memory
-        del self.buffer
-        self.buffer = bytearray()
+        self.reset()
 
         self.state = Piece.State.SAVED
 

@@ -7,6 +7,9 @@ import logging
 import math
 
 
+BLOCK_REQUEST_SIZE = 2**15
+
+
 class PeerClient:
     """
     Represents a connection to a peer. Handles incoming messages and sends out messages.
@@ -15,6 +18,7 @@ class PeerClient:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  p: peer.Peer, torrent: data.Torrent):
         self.peer = p
+        self.piece = None
         self.torrent = torrent
         self.writer = writer
 
@@ -55,31 +59,66 @@ class PeerClient:
         pass
 
     async def _handle_block(self, m: peer.BlockPeerMessage):
-        pass
+        if m.index == self.piece.piece_index:
+            await self.piece.load(m.begin, m.block)
 
     async def _handle_port(self, m: peer.PortPeerMessage):
         pass
+
+    async def respond(self):
+        """Generator that returns messages."""
+        while True:
+            # Ensure the peer isn't choking us
+            if self.peer.is_choking:
+                yield peer.InterestedPeerMessage()
+                break
+
+            self.piece = self.torrent.claim_piece(self.peer.piecefield)
+
+            while self.piece.state != data.Piece.State.SAVED:
+                if self.piece.state == data.Piece.State.EMPTY:
+                    # Continue downloaded the piece
+                    yield peer.RequestPeerMessage(*self.piece.get_block(), BLOCK_REQUEST_SIZE)
+                    continue
+                elif self.piece.state == data.Piece.State.FULL:
+                    if not await self.piece.verify():
+                        # Piece did not verify, add it back to the pool & reset state machine
+                        self.piece.reset()
+                        break
+                elif self.piece.state == data.Piece.State.VERIFIED:
+                    torrent_file = self.torrent.find_file(self.piece)
+                    await self.piece.save(torrent_file)
+
+            self.torrent.return_piece(self.piece)
+            self.piece = None
 
     async def handle(self):
         """
         Handles incoming peer messages and responds.
         """
-        async for message in await self.message_iter.load_generator():
-            if type(message) == peer.KeepAlivePeerMessage:
-                self.writer.write(peer.KeepAlivePeerMessage().encode())
+        respond_sm = self.respond()
 
-            await {
-                peer.HavePeerMessage: self._handle_have,
-                peer.ChokePeerMessage: self._handle_choke,
-                peer.UnchokePeerMessage: self._handle_unchoke,
-                peer.InterestedPeerMessage: self._handle_interested,
-                peer.NotInterestedPeerMessage: self._handle_not_interested,
-                peer.BitfieldPeerMessage: self._handle_bitfield,
-                peer.RequestPeerMessage: self._handle_request,
-                peer.BlockPeerMessage: self._handle_block,
-                peer.PortPeerMessage: self._handle_port
-            }[type(message)](message)
+        while True:
+            for message in await self.message_iter.load_iterator():
+                if type(message) == peer.KeepAlivePeerMessage:
+                    self.writer.write(peer.KeepAlivePeerMessage().encode())
 
+                await {
+                    peer.HavePeerMessage: self._handle_have,
+                    peer.ChokePeerMessage: self._handle_choke,
+                    peer.UnchokePeerMessage: self._handle_unchoke,
+                    peer.InterestedPeerMessage: self._handle_interested,
+                    peer.NotInterestedPeerMessage: self._handle_not_interested,
+                    peer.BitfieldPeerMessage: self._handle_bitfield,
+                    peer.RequestPeerMessage: self._handle_request,
+                    peer.BlockPeerMessage: self._handle_block,
+                    peer.PortPeerMessage: self._handle_port
+                }[type(message)](message)
+
+            # Send a response
+            response = await respond_sm.asend()
+            if response is not None:
+                await self.writer.write(response.encode())
 
 class Client:
     """
